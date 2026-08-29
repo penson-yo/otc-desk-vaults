@@ -237,14 +237,15 @@ async function loadPortfolioFrom(
   });
 
   const liveDesks = walletsOut.reduce((s, w) => s + w.liveDesks, 0);
-  const canProjectAnnual =
+  const apr = yld.apr;
+  const mintCostUsd = yld.mintCostUsd;
+  const estimatedAnnualUsd =
     yld.status === "ok" &&
-    yld.apr != null &&
-    yld.mintCostUsd != null &&
-    yld.apy != null;
-  const estimatedAnnualUsd = canProjectAnnual
-    ? liveDesks * yld.apr * yld.mintCostUsd
-    : null;
+    apr != null &&
+    mintCostUsd != null &&
+    yld.apy != null
+      ? liveDesks * apr * mintCostUsd
+      : null;
 
   const nextMint = config.stockMints[config.roundIndex];
   const nextTicker =
