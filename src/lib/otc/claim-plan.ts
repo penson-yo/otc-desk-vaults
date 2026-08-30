@@ -210,6 +210,9 @@ export function explainTxError(err: unknown): string {
   if (/429|rate-limit|Too many/i.test(msg)) {
     return "RPC rate-limited. Retry in a moment.";
   }
+  if (/403|Access forbidden/i.test(msg)) {
+    return "Solana RPC blocked the request. Retry, or set SOLANA_RPC_URL to a private endpoint.";
+  }
   if (/TransferHook|transfer hook/i.test(msg)) {
     return "Transfer hook requires extra accounts; skipped.";
   }

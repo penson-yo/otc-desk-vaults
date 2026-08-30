@@ -27,16 +27,15 @@ npm start -- --port 43127
 
 ### RPC
 
-Reads use `https://api.mainnet-beta.solana.com` unless you set:
+Reads use `https://solana-rpc.publicnode.com` (then the Solana Foundation URL) unless you set `SOLANA_RPC_URL`. Wallet claims go through same-origin `/api/rpc` so the browser is not 403'd by `api.mainnet-beta.solana.com`.
 
 ```
 SOLANA_RPC_URL=https://your-solana-rpc.example
-NEXT_PUBLIC_SOLANA_RPC_URL=https://your-solana-rpc.example
 ```
 
-`SOLANA_RPC_URL` is the server-side chain reader (config, vault PDAs, token accounts, Core assets). `NEXT_PUBLIC_SOLANA_RPC_URL` is the wallet-adapter RPC endpoint.
+`SOLANA_RPC_URL` is the server-side chain reader (config, vault PDAs, token accounts, Core assets) and the `/api/rpc` proxy. Set `NEXT_PUBLIC_SOLANA_RPC_URL` only if you want the wallet adapter to skip the proxy.
 
-The public endpoint rate-limits. This app retries `https://solana-rpc.publicnode.com` when the Solana Foundation URL fails. A free Helius / Triton / publicnode URL via `SOLANA_RPC_URL` is still better; **DAS is not required**. Desks are found with `getProgramAccounts` on Metaplex Core, filtered by owner + collection.
+The public endpoints rate-limit. A free Helius / Triton / publicnode URL via `SOLANA_RPC_URL` is still better; **DAS is not required**. Desks are found with `getProgramAccounts` on Metaplex Core, filtered by owner + collection.
 
 Spot prices come from [Dexscreener](https://api.dexscreener.com) (token pairs) with CoinGecko as a SOL fallback. If a ticker has no price, it is omitted from USD totals and called out in the yield panel.
 

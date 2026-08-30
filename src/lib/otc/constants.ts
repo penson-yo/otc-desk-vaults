@@ -34,20 +34,19 @@ export const OTC_DECIMALS = 6;
 export const TICKER_COUNT = 10;
 export const MAX_SUPPLY = 5_000;
 
-export const PUBLIC_RPC =
-  process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
-
-/** Tried in order when SOLANA_RPC_URL is unset (public mainnet is often busy). */
+/** Tried in order when SOLANA_RPC_URL is unset. Foundation RPC 403s browsers. */
 export const RPC_CANDIDATES = process.env.SOLANA_RPC_URL
   ? [process.env.SOLANA_RPC_URL]
   : [
-      "https://api.mainnet-beta.solana.com",
       "https://solana-rpc.publicnode.com",
+      "https://api.mainnet-beta.solana.com",
     ];
 
+export const PUBLIC_RPC = RPC_CANDIDATES[0]!;
+
+/** Browser wallet RPC. Same-origin proxy avoids Solana Foundation 403s. */
 export const CLIENT_RPC =
-  process.env.NEXT_PUBLIC_SOLANA_RPC_URL ??
-  "https://api.mainnet-beta.solana.com";
+  process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "/api/rpc";
 
 export type StockMeta = {
   mint: string;
