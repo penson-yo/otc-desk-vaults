@@ -42,17 +42,26 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { WATCH_STORAGE_KEY } from "@/lib/otc/constants";
+import { MAGIC_EDEN_COLLECTION_SYMBOL } from "@/lib/otc/constants";
 import {
+  dexscreenerToken,
+  fmtCompactUsd,
   fmtNum,
   fmtOtc,
   fmtPct,
   fmtTime,
   fmtUsd,
+  magicEdenCollection,
   magicEdenItem,
   shortAddress,
   solscanAccount,
 } from "@/lib/otc/format";
-import type { DeskHolding, PortfolioResponse, WatchWallet } from "@/lib/otc/types";
+import type {
+  DeskHolding,
+  MarketSnapshot,
+  PortfolioResponse,
+  WatchWallet,
+} from "@/lib/otc/types";
 import { cn } from "@/lib/utils";
 
 function readStored(): WatchWallet[] | null {
@@ -134,6 +143,7 @@ export function Dashboard({
   const [data, setData] = useState<PortfolioResponse | null>(initialData);
   const [error, setError] = useState<string | null>(initialError);
   const [loading, setLoading] = useState(false);
+  const [market, setMarket] = useState<MarketSnapshot | null>(null);
 
   const paintedKey = useRef(
     initialData ? initialData.wallets.map((w) => w.address).join(",") : null,
@@ -226,6 +236,30 @@ export function Dashboard({
     return () => window.clearInterval(id);
   }, [hydrated, wallets.length, load]);
 
+  useEffect(() => {
+    const ac = new AbortController();
+    async function loadMarket(signal: AbortSignal) {
+      try {
+        const timeout = AbortSignal.timeout(20_000);
+        const combined = AbortSignal.any([signal, timeout]);
+        const res = await fetch("/api/market", { signal: combined });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+        setMarket(json as MarketSnapshot);
+      } catch (err) {
+        if ((err as { name?: string }).name === "AbortError") return;
+      }
+    }
+    void loadMarket(ac.signal);
+    const id = window.setInterval(() => {
+      void loadMarket(ac.signal);
+    }, 60_000);
+    return () => {
+      ac.abort();
+      window.clearInterval(id);
+    };
+  }, []);
+
   function update(next: WatchWallet[]) {
     setWallets(next);
     persist(next);
@@ -315,6 +349,7 @@ export function Dashboard({
       </header>
 
       <div className="mt-4 grid gap-4">
+        <MarketStrip market={market} />
         <Frame title="Wallets" live>
           <p className="mb-3 text-[12px] leading-relaxed text-muted-foreground">
             Add one wallet at a time. This browser remembers the list for next
@@ -495,6 +530,43 @@ function LoadingState() {
   );
 }
 
+function MarketStrip({ market }: { market: MarketSnapshot | null }) {
+  const mint = market?.otcMint;
+  const symbol = market?.collectionSymbol ?? MAGIC_EDEN_COLLECTION_SYMBOL;
+  return (
+    <Frame title="Market" live>
+      <div className="flex flex-wrap items-stretch overflow-x-auto rounded-[9px] border border-line">
+        <Stat
+          label="OTC market cap"
+          value={fmtCompactUsd(market?.otcMarketCapUsd)}
+          hint={
+            market?.otcPriceUsd != null
+              ? `${fmtUsd(market.otcPriceUsd)} / OTC`
+              : undefined
+          }
+          tone="phos"
+          href={mint ? dexscreenerToken(mint) : undefined}
+        />
+        <Stat
+          label="Desk floor"
+          value={
+            market?.nftFloorSol == null
+              ? "—"
+              : `${fmtNum(market.nftFloorSol, { max: 2 })} SOL`
+          }
+          hint={
+            market?.nftFloorUsd != null
+              ? fmtUsd(market.nftFloorUsd)
+              : undefined
+          }
+          tone="gold"
+          href={magicEdenCollection(symbol)}
+        />
+      </div>
+    </Frame>
+  );
+}
+
 function Results({ data }: { data: PortfolioResponse }) {
   const y = data.yield;
   const desks = [...data.desks].sort((a, b) => a.serial - b.serial);
@@ -523,6 +595,32 @@ function Results({ data }: { data: PortfolioResponse }) {
             label="Paid to holders"
             value={fmtUsd(data.protocol.paidToHoldersUsd)}
             tone="phos"
+          />
+          <Stat
+            label="OTC market cap"
+            value={fmtCompactUsd(data.protocol.otcMarketCapUsd)}
+            hint={
+              data.protocol.otcPriceUsd != null
+                ? `${fmtUsd(data.protocol.otcPriceUsd)} / OTC`
+                : undefined
+            }
+            tone="phos"
+            href={dexscreenerToken(data.protocol.tokenMint)}
+          />
+          <Stat
+            label="Desk floor"
+            value={
+              data.protocol.nftFloorSol == null
+                ? "—"
+                : `${fmtNum(data.protocol.nftFloorSol, { max: 2 })} SOL`
+            }
+            hint={
+              data.protocol.nftFloorUsd != null
+                ? fmtUsd(data.protocol.nftFloorUsd)
+                : undefined
+            }
+            tone="gold"
+            href={magicEdenCollection(MAGIC_EDEN_COLLECTION_SYMBOL)}
           />
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
@@ -805,11 +903,15 @@ function DeskRow({ desk }: { desk: DeskHolding }) {
 function Stat({
   label,
   value,
+  hint,
   tone = "ink",
+  href,
 }: {
   label: string;
   value: string;
+  hint?: string;
   tone?: "ink" | "head" | "gold" | "phos";
+  href?: string;
 }) {
   const color =
     tone === "head"
@@ -819,16 +921,34 @@ function Stat({
         : tone === "phos"
           ? "text-phos"
           : "text-ink";
-  return (
-    <div className="min-w-[108px] grow basis-0 border-l border-line px-2.5 py-2 first:border-l-0">
+  const inner = (
+    <>
       <div className="truncate text-[7px] uppercase tracking-[0.12em] text-muted-foreground">
         {label}
       </div>
       <div className={cn("tnum mt-1 truncate text-[11px] font-bold leading-none", color)}>
         {value}
       </div>
-    </div>
+      {hint ? (
+        <div className="mt-1 truncate text-[10px] text-muted-foreground">{hint}</div>
+      ) : null}
+    </>
   );
+  const className =
+    "min-w-[108px] grow basis-0 border-l border-line px-2.5 py-2 first:border-l-0";
+  if (href) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className={cn(className, "hover:bg-well/60")}
+      >
+        {inner}
+      </a>
+    );
+  }
+  return <div className={className}>{inner}</div>;
 }
 
 function MiniStat({ label, value }: { label: string; value: string }) {

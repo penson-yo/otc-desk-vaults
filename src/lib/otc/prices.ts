@@ -1,35 +1,78 @@
 import { WSOL_MINT } from "./constants";
 
-type DexPair = {
+export type DexPair = {
   chainId?: string;
   baseToken?: { address?: string; symbol?: string };
   quoteToken?: { address?: string };
   priceUsd?: string;
   liquidity?: { usd?: number };
+  marketCap?: number;
+  fdv?: number;
 };
 
 const WSOL = WSOL_MINT.toBase58();
 
+export type SpotQuotes = {
+  prices: Record<string, number>;
+  marketCaps: Record<string, number>;
+};
+
 export async function fetchSpotPrices(
   mints: string[],
 ): Promise<Record<string, number>> {
+  return (await fetchSpotQuotes(mints)).prices;
+}
+
+export async function fetchSpotQuotes(mints: string[]): Promise<SpotQuotes> {
   const unique = [...new Set(mints.filter(Boolean))];
   const prices: Record<string, number> = {};
+  const marketCaps: Record<string, number> = {};
 
   await Promise.all([
-    fillDexscreener(unique, prices),
+    fillDexscreener(unique, prices, marketCaps),
     fillCoinGeckoSol(prices),
   ]);
 
-  return prices;
+  return { prices, marketCaps };
+}
+
+export function pickBestDexQuote(
+  mint: string,
+  pairs: DexPair[],
+): { price: number; marketCap: number | null; liq: number } | null {
+  let best: { price: number; marketCap: number | null; liq: number } | null =
+    null;
+  for (const pair of pairs) {
+    if (pair.chainId && pair.chainId !== "solana") continue;
+    const price = Number(pair.priceUsd);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const liq = pair.liquidity?.usd ?? 0;
+    const base = pair.baseToken?.address;
+    const isMint = base === mint;
+    const isWsol = mint === WSOL && base === WSOL;
+    if (!isMint && !isWsol) continue;
+    const marketCap = capFromPair(pair);
+    if (!best || liq >= best.liq) {
+      best = { price, marketCap, liq };
+    }
+  }
+  return best;
+}
+
+export function capFromPair(pair: DexPair): number | null {
+  const cap = Number(pair.marketCap);
+  if (Number.isFinite(cap) && cap > 0) return cap;
+  const fdv = Number(pair.fdv);
+  if (Number.isFinite(fdv) && fdv > 0) return fdv;
+  return null;
 }
 
 async function fillDexscreener(
   mints: string[],
   prices: Record<string, number>,
+  marketCaps: Record<string, number>,
 ) {
   if (mints.length === 0) return;
-  // Dexscreener accepts comma-separated mints.
   const chunks: string[][] = [];
   for (let i = 0; i < mints.length; i += 8) {
     chunks.push(mints.slice(i, i + 8));
@@ -43,29 +86,14 @@ async function fillDexscreener(
       });
       if (!res.ok) continue;
       const json = (await res.json()) as { pairs?: DexPair[] };
-      const best = new Map<string, { price: number; liq: number }>();
-      for (const pair of json.pairs ?? []) {
-        if (pair.chainId && pair.chainId !== "solana") continue;
-        const price = Number(pair.priceUsd);
-        if (!Number.isFinite(price) || price <= 0) continue;
-        const liq = pair.liquidity?.usd ?? 0;
-        const base = pair.baseToken?.address;
-        if (base && mints.includes(base)) {
-          const prev = best.get(base);
-          if (!prev || liq >= prev.liq) best.set(base, { price, liq });
+      const pairs = json.pairs ?? [];
+      for (const mint of chunk) {
+        const best = pickBestDexQuote(mint, pairs);
+        if (!best) continue;
+        if (prices[mint] == null) prices[mint] = best.price;
+        if (best.marketCap != null && marketCaps[mint] == null) {
+          marketCaps[mint] = best.marketCap;
         }
-        // Wrapped SOL pairs quote OTC/stocks in SOL.
-        const quote = pair.quoteToken?.address;
-        if (quote === WSOL && !best.has(WSOL) && pair.baseToken?.symbol) {
-          // ignore; SOL priced via CoinGecko + SOL pairs below
-        }
-        if (base === WSOL) {
-          const prev = best.get(WSOL);
-          if (!prev || liq >= prev.liq) best.set(WSOL, { price, liq });
-        }
-      }
-      for (const [mint, v] of best) {
-        if (prices[mint] == null) prices[mint] = v.price;
       }
     } catch {
       // Price feed is best-effort; yield layer explains gaps.
