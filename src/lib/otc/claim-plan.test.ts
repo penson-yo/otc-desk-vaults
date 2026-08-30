@@ -24,7 +24,7 @@ import {
   planClaim,
 } from "./claim-plan";
 import { configPda, poolStockAta, userStockAta, vaultStockAta } from "./pda";
-import { packClaimBatches } from "./run-claim";
+import { hasActiveTransferHook, packClaimBatches } from "./run-claim";
 import type { DeskHolding, SlotHolding } from "./types";
 
 const USER = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -203,6 +203,29 @@ describe("claim plan", () => {
     const totals = mintTotals(planClaim([a, b], owner));
     assert.equal(totals.length, 1);
     assert.equal(totals[0]!.uiAmount, 4);
+  });
+});
+
+describe("transfer hook detection", () => {
+  it("ignores absent and disabled transfer hooks", () => {
+    assert.equal(hasActiveTransferHook(null), false);
+    assert.equal(
+      hasActiveTransferHook({
+        authority: USER,
+        programId: PublicKey.default,
+      }),
+      false,
+    );
+  });
+
+  it("detects a non-default transfer hook program", () => {
+    assert.equal(
+      hasActiveTransferHook({
+        authority: USER,
+        programId: PROGRAM_ID,
+      }),
+      true,
+    );
   });
 });
 

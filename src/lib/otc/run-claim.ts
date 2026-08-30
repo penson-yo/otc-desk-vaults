@@ -34,6 +34,12 @@ const MAX_CU = 1_400_000;
 const CU_PRICE = 10_000;
 const SIGN_ALL_CHUNK = 5;
 
+export function hasActiveTransferHook(
+  hook: ReturnType<typeof getTransferHook>,
+): boolean {
+  return hook !== null && !hook.programId.equals(PublicKey.default);
+}
+
 export async function mintsWithTransferHook(
   connection: Connection,
   mints: string[],
@@ -49,7 +55,9 @@ export async function mintsWithTransferHook(
       if (!info) return;
       try {
         const mint = unpackMint(key, info, TOKEN_2022_PROGRAM_ID);
-        if (getTransferHook(mint)) hooked.add(key.toBase58());
+        if (hasActiveTransferHook(getTransferHook(mint))) {
+          hooked.add(key.toBase58());
+        }
       } catch {
         // If we cannot parse extensions, try the instruction and surface errors.
       }
