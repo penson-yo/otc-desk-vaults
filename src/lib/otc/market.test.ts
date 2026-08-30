@@ -53,6 +53,27 @@ describe("pickBestDexQuote", () => {
     assert.equal(capFromPair({ fdv: 500_000 }), 500_000);
     assert.equal(capFromPair({ marketCap: 0, fdv: 12 }), 12);
   });
+
+  it("ignores pairs for other mints", () => {
+    const pairs: DexPair[] = [
+      {
+        chainId: "solana",
+        baseToken: { address: "So11111111111111111111111111111111111111112", symbol: "SOL" },
+        priceUsd: "100",
+        liquidity: { usd: 50_000_000 },
+        marketCap: 50_000_000_000,
+      },
+      {
+        chainId: "solana",
+        baseToken: { address: OTC, symbol: "OTC" },
+        priceUsd: "0.001",
+        liquidity: { usd: 1_000 },
+        marketCap: 900_000,
+      },
+    ];
+    const best = pickBestDexQuote(OTC, pairs);
+    assert.equal(best?.marketCap, 900_000);
+  });
 });
 
 describe("fmtCompactUsd", () => {

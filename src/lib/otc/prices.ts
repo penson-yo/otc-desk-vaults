@@ -73,11 +73,16 @@ async function fillDexscreener(
   marketCaps: Record<string, number>,
 ) {
   if (mints.length === 0) return;
+  // WSOL has so many pairs that batching it with other mints crowds
+  // the Dexscreener response and drops the real OTC pool.
+  const tokenMints = mints.filter((m) => m !== WSOL);
   const chunks: string[][] = [];
-  for (let i = 0; i < mints.length; i += 8) {
-    chunks.push(mints.slice(i, i + 8));
+  for (let i = 0; i < tokenMints.length; i += 8) {
+    chunks.push(tokenMints.slice(i, i + 8));
   }
+  if (mints.includes(WSOL)) chunks.push([WSOL]);
   for (const chunk of chunks) {
+    if (chunk.length === 0) continue;
     const url = `https://api.dexscreener.com/latest/dex/tokens/${chunk.join(",")}`;
     try {
       const res = await fetch(url, {
