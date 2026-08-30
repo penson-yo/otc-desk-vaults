@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
@@ -24,7 +24,11 @@ import {
   planClaim,
 } from "./claim-plan";
 import { configPda, poolStockAta, userStockAta, vaultStockAta } from "./pda";
-import { hasActiveTransferHook, packClaimBatches } from "./run-claim";
+import {
+  hasActiveTransferHook,
+  packClaimBatches,
+  sendClaimBatches,
+} from "./run-claim";
 import type { DeskHolding, SlotHolding } from "./types";
 
 const USER = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -299,5 +303,68 @@ describe("packing", () => {
     const items = groupsToQueueItems(planClaim([d], USER.toBase58()));
     assert.ok(items.some((it) => it.label.includes("#42") && it.label.includes("AAPLx") && it.label.includes("sweep")));
     assert.ok(items.some((it) => it.label.includes("claim")));
+  });
+
+  it("broadcasts every bulk-signed transaction before polling statuses", async () => {
+    const signer = Keypair.generate();
+    const events: string[] = [];
+    let signatureNumber = 0;
+    const connection = {
+      getLatestBlockhash: async () => ({
+        blockhash: BLOCKHASH,
+        lastValidBlockHeight: 999,
+      }),
+      sendRawTransaction: async () => {
+        signatureNumber += 1;
+        const signature = `signature-${signatureNumber}`;
+        events.push(`broadcast:${signature}`);
+        return signature;
+      },
+      getSignatureStatuses: async (signatures: string[]) => {
+        events.push(`status:${signatures.join(",")}`);
+        return {
+          context: { slot: 1 },
+          value: signatures.map(() => ({
+            slot: 1,
+            confirmations: 1,
+            err: null,
+            confirmationStatus: "confirmed" as const,
+            status: { Ok: null },
+          })),
+        };
+      },
+    } as unknown as import("@solana/web3.js").Connection;
+    const batches = [
+      { ixs: [], itemIds: ["first"] },
+      { ixs: [], itemIds: ["second"] },
+    ];
+    const items = [
+      { id: "first", label: "First", status: "pending" as const },
+      { id: "second", label: "Second", status: "pending" as const },
+    ];
+
+    const result = await sendClaimBatches({
+      connection,
+      user: signer.publicKey,
+      batches,
+      items,
+      send: {
+        sendTransaction: async () => {
+          throw new Error("single-send path should not run");
+        },
+        signAllTransactions: async (transactions) => {
+          transactions.forEach((transaction) => transaction.partialSign(signer));
+          return transactions;
+        },
+      },
+      onProgress: () => undefined,
+    });
+
+    assert.deepEqual(events, [
+      "broadcast:signature-1",
+      "broadcast:signature-2",
+      "status:signature-1,signature-2",
+    ]);
+    assert.ok(result.every((item) => item.status === "sent"));
   });
 });

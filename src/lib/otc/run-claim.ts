@@ -29,10 +29,16 @@ export type SendFns = {
   signAllTransactions?: (txs: Transaction[]) => Promise<Transaction[]>;
 };
 
+type SubmittedTransaction = {
+  signature: string;
+  itemIds: string[];
+};
+
 const CU_PER_IX = 250_000;
 const MAX_CU = 1_400_000;
 const CU_PRICE = 10_000;
 const SIGN_ALL_CHUNK = 5;
+const CONFIRM_POLL_MS = 750;
 
 export function hasActiveTransferHook(
   hook: ReturnType<typeof getTransferHook>,
@@ -120,6 +126,70 @@ export function withComputeBudget(
   ];
 }
 
+async function confirmSubmittedTransactions(args: {
+  connection: Connection;
+  submitted: SubmittedTransaction[];
+  lastValidBlockHeight: number;
+  onConfirmed: (tx: SubmittedTransaction) => void;
+  onFailed: (tx: SubmittedTransaction, error: unknown) => void;
+  pollIntervalMs?: number;
+}): Promise<void> {
+  let pending = [...args.submitted];
+  const pollIntervalMs = args.pollIntervalMs ?? CONFIRM_POLL_MS;
+
+  while (pending.length > 0) {
+    try {
+      const statuses = await args.connection.getSignatureStatuses(
+        pending.map((tx) => tx.signature),
+        { searchTransactionHistory: true },
+      );
+      const next: SubmittedTransaction[] = [];
+      statuses.value.forEach((status, index) => {
+        const tx = pending[index]!;
+        if (status?.err) {
+          args.onFailed(
+            tx,
+            new Error(`Transaction failed: ${JSON.stringify(status.err)}`),
+          );
+        } else if (
+          status?.confirmationStatus === "confirmed" ||
+          status?.confirmationStatus === "finalized"
+        ) {
+          args.onConfirmed(tx);
+        } else {
+          next.push(tx);
+        }
+      });
+      pending = next;
+    } catch {
+      // A transient status-read failure should not relabel submitted claims.
+    }
+
+    if (pending.length === 0) return;
+
+    let blockHeight: number;
+    try {
+      blockHeight = await args.connection.getBlockHeight("confirmed");
+    } catch (err) {
+      pending.forEach((tx) => args.onFailed(tx, err));
+      return;
+    }
+    if (blockHeight > args.lastValidBlockHeight) {
+      pending.forEach((tx) =>
+        args.onFailed(
+          tx,
+          new Error(
+            `Signature ${tx.signature} has expired: block height exceeded.`,
+          ),
+        ),
+      );
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
 export async function sendClaimBatches(args: {
   connection: Connection;
   user: PublicKey;
@@ -150,32 +220,44 @@ export async function sendClaimBatches(args: {
     for (let i = 0; i < args.batches.length; i += SIGN_ALL_CHUNK) {
       const chunk = args.batches.slice(i, i + SIGN_ALL_CHUNK);
       const idSlice = chunk.flatMap((b) => b.itemIds);
+      let signed: Transaction[];
+      let lastValidBlockHeight: number;
       try {
-        const { blockhash, lastValidBlockHeight } =
+        const latest =
           await args.connection.getLatestBlockhash("confirmed");
-        const slice = chunk.map((b) => buildTx(b.ixs, blockhash));
-        const signed = await args.send.signAllTransactions!(slice);
-        patch(idSlice, "signed");
-        for (let j = 0; j < signed.length; j++) {
-          const ids = chunk[j]!.itemIds;
-          try {
-            const sig = await args.connection.sendRawTransaction(
-              signed[j]!.serialize(),
-              { skipPreflight: false, preflightCommitment: "confirmed" },
-            );
-            await args.connection.confirmTransaction(
-              { signature: sig, blockhash, lastValidBlockHeight },
-              "confirmed",
-            );
-            patch(ids, "sent", { signature: sig });
-          } catch (err) {
-            patch(ids, "failed", { error: explainTxError(err) });
-          }
-        }
+        lastValidBlockHeight = latest.lastValidBlockHeight;
+        const slice = chunk.map((b) => buildTx(b.ixs, latest.blockhash));
+        signed = await args.send.signAllTransactions!(slice);
       } catch (err) {
         patch(idSlice, "failed", { error: explainTxError(err) });
         if (/cancelled/i.test(explainTxError(err))) break;
+        continue;
       }
+
+      patch(idSlice, "signed");
+      const submitted: SubmittedTransaction[] = [];
+      for (let j = 0; j < signed.length; j++) {
+        const ids = chunk[j]!.itemIds;
+        try {
+          const signature = await args.connection.sendRawTransaction(
+            signed[j]!.serialize(),
+            { skipPreflight: false, preflightCommitment: "confirmed" },
+          );
+          submitted.push({ signature, itemIds: ids });
+        } catch (err) {
+          patch(ids, "failed", { error: explainTxError(err) });
+        }
+      }
+
+      await confirmSubmittedTransactions({
+        connection: args.connection,
+        submitted,
+        lastValidBlockHeight,
+        onConfirmed: ({ signature, itemIds }) =>
+          patch(itemIds, "sent", { signature }),
+        onFailed: ({ itemIds }, err) =>
+          patch(itemIds, "failed", { error: explainTxError(err) }),
+      });
     }
     return items;
   }
@@ -187,12 +269,16 @@ export async function sendClaimBatches(args: {
         await args.connection.getLatestBlockhash("confirmed");
       const tx = buildTx(batch.ixs, blockhash);
       patch(ids, "signed");
-      const sig = await args.send.sendTransaction(tx, args.connection);
-      await args.connection.confirmTransaction(
-        { signature: sig, blockhash, lastValidBlockHeight },
-        "confirmed",
-      );
-      patch(ids, "sent", { signature: sig });
+      const signature = await args.send.sendTransaction(tx, args.connection);
+      await confirmSubmittedTransactions({
+        connection: args.connection,
+        submitted: [{ signature, itemIds: ids }],
+        lastValidBlockHeight,
+        onConfirmed: (submitted) =>
+          patch(ids, "sent", { signature: submitted.signature }),
+        onFailed: (_submitted, err) =>
+          patch(ids, "failed", { error: explainTxError(err) }),
+      });
     } catch (err) {
       patch(ids, "failed", { error: explainTxError(err) });
       if (/cancelled/i.test(explainTxError(err))) break;
