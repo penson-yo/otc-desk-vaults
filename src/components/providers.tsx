@@ -11,6 +11,7 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import {
   CLIENT_RPC,
+  CLIENT_WS_RPC,
   WALLET_USES_PROXY,
   walletProxyUrl,
 } from "@/lib/otc/constants";
@@ -28,6 +29,10 @@ if (typeof window !== "undefined") {
  * on phones. Recreating adapters on render disconnects the session.
  */
 const WALLETS: Adapter[] = [new PhantomWalletAdapter()];
+const CONNECTION_CONFIG = {
+  commitment: "confirmed" as const,
+  wsEndpoint: CLIENT_WS_RPC,
+};
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -38,11 +43,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- origin is only available after SSR
     if (WALLET_USES_PROXY) setEndpoint(walletProxyUrl());
   }, []);
 
   return (
-    <ConnectionProvider endpoint={endpoint}>
+    <ConnectionProvider endpoint={endpoint} config={CONNECTION_CONFIG}>
       <WalletProvider
         wallets={WALLETS}
         // WalletModal only calls select(). Without this, picking a wallet

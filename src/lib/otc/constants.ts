@@ -56,6 +56,11 @@ export const CLIENT_RPC = isHttpUrl(process.env.NEXT_PUBLIC_SOLANA_RPC_URL)
   ? process.env.NEXT_PUBLIC_SOLANA_RPC_URL
   : PUBLIC_RPC;
 
+/** WebSocket subscriptions cannot pass through the same-origin Vercel route. */
+export const CLIENT_WS_RPC = isHttpUrl(process.env.NEXT_PUBLIC_SOLANA_RPC_URL)
+  ? process.env.NEXT_PUBLIC_SOLANA_RPC_URL.replace(/^http/, "ws")
+  : "wss://solana-rpc.publicnode.com";
+
 /** Same-origin wallet RPC path. Connection needs origin + this (not a relative URL). */
 export const WALLET_RPC_PATH = "/api/rpc";
 
