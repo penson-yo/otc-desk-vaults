@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start --hostname 127.0.0.1 --port 43127",
     "lint": "eslint",
-    "test": "tsx --test src/lib/otc/claim-plan.test.ts"
+    "test": "tsx --test src/lib/otc/*.test.ts"
   },
   "dependencies": {
     "@solana-mobile/wallet-adapter-mobile": "^2.3.0",

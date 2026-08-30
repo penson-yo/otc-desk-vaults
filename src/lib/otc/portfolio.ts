@@ -26,7 +26,8 @@ import {
 } from "./decode";
 import { uiAmount } from "./format";
 import { configPda, solPotPda, vaultPda, vaultStockAta } from "./pda";
-import { fetchSpotPrices } from "./prices";
+import { fetchNftFloor } from "./market";
+import { fetchSpotQuotes } from "./prices";
 import type {
   DeskHolding,
   PortfolioResponse,
@@ -115,19 +116,27 @@ async function loadPortfolioFrom(
   const activeMints = config.stockMints.filter((m) => !isDefaultMint(m));
 
   const uniqueWallets = dedupeWallets(wallets);
-  const [otcBalances, deskMap, firstMintAt, prices] = await Promise.all([
-    fetchOtcBalances(conn, uniqueWallets, tokenMint),
-    fetchDesksForWallets(conn, uniqueWallets, collection),
-    Promise.race([
-      fetchFirstMintAt(conn),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 12_000)),
-    ]),
-    fetchSpotPrices([
-      WSOL_MINT.toBase58(),
-      config.tokenMint,
-      ...activeMints,
-    ]),
-  ]);
+  const [otcBalances, deskMap, firstMintAt, quotes, nftFloor] =
+    await Promise.all([
+      fetchOtcBalances(conn, uniqueWallets, tokenMint),
+      fetchDesksForWallets(conn, uniqueWallets, collection),
+      Promise.race([
+        fetchFirstMintAt(conn),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 12_000)),
+      ]),
+      fetchSpotQuotes([
+        WSOL_MINT.toBase58(),
+        config.tokenMint,
+        ...activeMints,
+      ]),
+      fetchNftFloor(),
+    ]);
+  const prices = quotes.prices;
+  const otcPriceUsd = prices[config.tokenMint] ?? null;
+  const otcMarketCapUsd = quotes.marketCaps[config.tokenMint] ?? null;
+  const solUsd = prices[WSOL_MINT.toBase58()] ?? null;
+  const nftFloorUsd =
+    nftFloor.sol != null && solUsd != null ? nftFloor.sol * solUsd : null;
 
   const allDesks = uniqueWallets.flatMap((w) => deskMap.get(w.address) ?? []);
   const vaultKeys = allDesks.map((d) => vaultPda(new PublicKey(d.asset)));
@@ -274,6 +283,10 @@ async function loadPortfolioFrom(
       surchargeSol: Number(config.surcharge) / 1e9,
       otcBurned: null,
       paidToHoldersUsd: yld.paidToHoldersUsd,
+      otcPriceUsd,
+      otcMarketCapUsd,
+      nftFloorSol: nftFloor.sol,
+      nftFloorUsd,
     },
     prices,
     yield: yld,

@@ -75,6 +75,21 @@ export type ProtocolSnapshot = {
   surchargeSol: number;
   otcBurned: number | null;
   paidToHoldersUsd: number | null;
+  otcPriceUsd: number | null;
+  otcMarketCapUsd: number | null;
+  nftFloorSol: number | null;
+  nftFloorUsd: number | null;
+};
+
+export type MarketSnapshot = {
+  fetchedAt: number;
+  otcMint: string | null;
+  otcPriceUsd: number | null;
+  otcMarketCapUsd: number | null;
+  nftFloorSol: number | null;
+  nftFloorUsd: number | null;
+  listedCount: number | null;
+  collectionSymbol: string;
 };
 
 export type PortfolioResponse = {

@@ -154,5 +154,8 @@ export function stockMeta(mint: string): StockMeta {
   );
 }
 
+/** Magic Eden collection slug for OTC Desk NFTs. */
+export const MAGIC_EDEN_COLLECTION_SYMBOL = "otc_desks";
+
 export const WATCH_STORAGE_KEY = "otc-vaults-watch";
 export const THEME_STORAGE_KEY = "theme";
