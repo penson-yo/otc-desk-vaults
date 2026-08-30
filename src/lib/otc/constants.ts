@@ -44,9 +44,24 @@ export const RPC_CANDIDATES = process.env.SOLANA_RPC_URL
 
 export const PUBLIC_RPC = RPC_CANDIDATES[0]!;
 
-/** Browser wallet RPC. Same-origin proxy avoids Solana Foundation 403s. */
-export const CLIENT_RPC =
-  process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "/api/rpc";
+function isHttpUrl(url: string | undefined): url is string {
+  return !!url && /^https?:\/\//i.test(url);
+}
+
+/**
+ * Absolute RPC for constructing `Connection` during SSR/prerender.
+ * `@solana/web3.js` rejects relative URLs (`/api/rpc`).
+ */
+export const CLIENT_RPC = isHttpUrl(process.env.NEXT_PUBLIC_SOLANA_RPC_URL)
+  ? process.env.NEXT_PUBLIC_SOLANA_RPC_URL
+  : PUBLIC_RPC;
+
+/** Same-origin wallet RPC. Use after mount so prerender still gets http(s). */
+export const WALLET_RPC_PROXY = "/api/rpc";
+
+export const WALLET_USES_PROXY = !isHttpUrl(
+  process.env.NEXT_PUBLIC_SOLANA_RPC_URL,
+);
 
 export type StockMeta = {
   mint: string;

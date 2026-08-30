@@ -1,7 +1,7 @@
 "use client";
 
 import { Buffer } from "buffer";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Adapter, WalletError } from "@solana/wallet-adapter-base";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import {
@@ -9,7 +9,11 @@ import {
   WalletProvider,
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { CLIENT_RPC } from "@/lib/otc/constants";
+import {
+  CLIENT_RPC,
+  WALLET_RPC_PROXY,
+  WALLET_USES_PROXY,
+} from "@/lib/otc/constants";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import "@/app/wallet-adapter-overrides.css";
 
@@ -27,13 +31,18 @@ const WALLETS: Adapter[] = [new PhantomWalletAdapter()];
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [endpoint, setEndpoint] = useState(CLIENT_RPC);
   const onError = useCallback((error: WalletError) => {
     console.error("Wallet adapter:", error);
     setWalletError(error.message || String(error));
   }, []);
 
+  useEffect(() => {
+    if (WALLET_USES_PROXY) setEndpoint(WALLET_RPC_PROXY);
+  }, []);
+
   return (
-    <ConnectionProvider endpoint={CLIENT_RPC}>
+    <ConnectionProvider endpoint={endpoint}>
       <WalletProvider
         wallets={WALLETS}
         // WalletModal only calls select(). Without this, picking a wallet
