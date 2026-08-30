@@ -56,12 +56,16 @@ export const CLIENT_RPC = isHttpUrl(process.env.NEXT_PUBLIC_SOLANA_RPC_URL)
   ? process.env.NEXT_PUBLIC_SOLANA_RPC_URL
   : PUBLIC_RPC;
 
-/** Same-origin wallet RPC. Use after mount so prerender still gets http(s). */
-export const WALLET_RPC_PROXY = "/api/rpc";
+/** Same-origin wallet RPC path. Connection needs origin + this (not a relative URL). */
+export const WALLET_RPC_PATH = "/api/rpc";
 
 export const WALLET_USES_PROXY = !isHttpUrl(
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL,
 );
+
+export function walletProxyUrl(): string {
+  return `${window.location.origin}${WALLET_RPC_PATH}`;
+}
 
 export type StockMeta = {
   mint: string;

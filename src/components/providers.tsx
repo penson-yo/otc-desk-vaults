@@ -11,8 +11,8 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import {
   CLIENT_RPC,
-  WALLET_RPC_PROXY,
   WALLET_USES_PROXY,
+  walletProxyUrl,
 } from "@/lib/otc/constants";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import "@/app/wallet-adapter-overrides.css";
@@ -38,7 +38,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (WALLET_USES_PROXY) setEndpoint(WALLET_RPC_PROXY);
+    if (WALLET_USES_PROXY) setEndpoint(walletProxyUrl());
   }, []);
 
   return (
