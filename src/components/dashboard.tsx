@@ -552,7 +552,7 @@ function MarketStrip({ market }: { market: MarketSnapshot | null }) {
           value={
             market?.nftFloorSol == null
               ? "—"
-              : `${fmtNum(market.nftFloorSol, { max: 2 })} SOL`
+              : `${fmtNum(market.nftFloorSol, { max: 3, min: 2 })} SOL`
           }
           hint={
             market?.nftFloorUsd != null
@@ -612,7 +612,7 @@ function Results({ data }: { data: PortfolioResponse }) {
             value={
               data.protocol.nftFloorSol == null
                 ? "—"
-                : `${fmtNum(data.protocol.nftFloorSol, { max: 2 })} SOL`
+                : `${fmtNum(data.protocol.nftFloorSol, { max: 3, min: 2 })} SOL`
             }
             hint={
               data.protocol.nftFloorUsd != null
