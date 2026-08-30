@@ -36,7 +36,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ConnectionProvider endpoint={CLIENT_RPC}>
       <WalletProvider
         wallets={WALLETS}
-        autoConnect={false}
+        // WalletModal only calls select(). Without this, picking a wallet
+        // closes the modal and never calls adapter.connect(), so Phantom
+        // never prompts.
+        autoConnect
         onError={onError}
       >
         <WalletModalProvider>
