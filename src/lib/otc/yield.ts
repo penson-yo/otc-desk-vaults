@@ -40,11 +40,10 @@ export function paidToHoldersUsd(
 }
 
 /**
- * Protocol APR/APY is not published. We annualize historical USD of
+ * Protocol APR is not published. We annualize historical USD of
  * `acquired` stock per live desk against mint cost (burned OTC + 0.5 SOL surcharge).
  *
  * APR  = (paidUsd / holders / years) / mintCostUsd
- * APY  = (1 + APR/365)^365 − 1   (daily compounding of that simple rate)
  */
 export function estimateYield(args: {
   config: OtcConfig;
@@ -53,7 +52,7 @@ export function estimateYield(args: {
   now: number;
 }): YieldEstimate {
   const formula =
-    "APR = ((Σ acquired[i] × price[i]) / live desks / years since first mint) / (OTC deposit × OTC price + 0.5 SOL). APY = (1 + APR/365)^365 − 1. Counters are on-chain; prices are spot. Not a protocol-published rate.";
+    "APR = (paid to holders / live desks / years since first mint) / mint cost. Spot prices; not a published rate.";
 
   const holders = Number(args.config.holders);
   const { usd: paid, missing } = paidToHoldersUsd(args.config, args.prices);
@@ -151,18 +150,13 @@ export function estimateYield(args: {
 
   const annualUsd = usdPerDesk / years;
   const apr = annualUsd / cost;
-  // Daily compounding of a four-digit APR from a two-day mint window is not a rate.
-  const apy =
-    days >= 30 && apr < 2 && apr > -1
-      ? Math.pow(1 + apr / 365, 365) - 1
-      : null;
 
   const shortWindow =
     days < 30
-      ? `Annualized from ${days.toFixed(1)} days of rounds (TGE-scale minting). Treat APR as a run-rate, not a forecast. APY is omitted until the sample is ~30 days — compounding this window would be meaningless.`
+      ? `Run-rate from ${days.toFixed(1)} days of rounds — not a forecast.`
       : missing.length > 0
         ? `Missing prices for ${missing.join(", ")}; those tickers are omitted from paid-to-holders.`
-        : null;
+        : "Simple APR from paid-to-holders vs mint cost. Not a published rate.";
 
   return {
     status: "ok",
@@ -174,7 +168,7 @@ export function estimateYield(args: {
     firstMintAt,
     mintCostUsd: cost,
     apr,
-    apy,
+    apy: null,
     derived: true,
   };
 }

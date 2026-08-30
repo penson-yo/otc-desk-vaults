@@ -4,11 +4,11 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
 import {
+  ChevronDown,
   ExternalLink,
   Loader2,
   Plus,
   RefreshCw,
-  ShieldCheck,
   Trash2,
   Unplug,
   Wallet,
@@ -19,6 +19,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -29,16 +31,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  DEFAULT_WATCH_WALLETS,
-  WATCH_STORAGE_KEY,
-} from "@/lib/otc/constants";
+import { WATCH_STORAGE_KEY } from "@/lib/otc/constants";
 import {
   fmtNum,
   fmtOtc,
@@ -49,12 +47,8 @@ import {
   shortAddress,
   solscanAccount,
 } from "@/lib/otc/format";
-import type { PortfolioResponse, WatchWallet } from "@/lib/otc/types";
+import type { DeskHolding, PortfolioResponse, WatchWallet } from "@/lib/otc/types";
 import { cn } from "@/lib/utils";
-
-function defaultWallets(): WatchWallet[] {
-  return DEFAULT_WATCH_WALLETS.map((w) => ({ ...w }));
-}
 
 function readStored(): WatchWallet[] | null {
   try {
@@ -70,6 +64,10 @@ function readStored(): WatchWallet[] | null {
 
 function persist(wallets: WatchWallet[]) {
   try {
+    if (wallets.length === 0) {
+      localStorage.removeItem(WATCH_STORAGE_KEY);
+      return;
+    }
     localStorage.setItem(WATCH_STORAGE_KEY, JSON.stringify(wallets));
   } catch {
     // ignore
@@ -123,12 +121,14 @@ export function Dashboard({
   initialData: PortfolioResponse | null;
   initialError: string | null;
 }) {
-  const [wallets, setWallets] = useState<WatchWallet[]>(defaultWallets);
+  const [wallets, setWallets] = useState<WatchWallet[]>([]);
   const [hydrated, setHydrated] = useState(false);
-  const [paste, setPaste] = useState("");
+  const [addressInput, setAddressInput] = useState("");
+  const [labelInput, setLabelInput] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
   const [data, setData] = useState<PortfolioResponse | null>(initialData);
   const [error, setError] = useState<string | null>(initialError);
-  const [loading, setLoading] = useState(!initialData && !initialError);
+  const [loading, setLoading] = useState(false);
 
   const paintedKey = useRef(
     initialData ? initialData.wallets.map((w) => w.address).join(",") : null,
@@ -139,7 +139,7 @@ export function Dashboard({
   useEffect(() => {
     const fromQuery = fromUrl();
     const stored = readStored();
-    const initial = fromQuery ?? stored ?? defaultWallets();
+    const initial = fromQuery ?? stored ?? [];
     // Hydrate from URL / localStorage after mount (SSR has no window).
     // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage/URL hydration
     setWallets(initial);
@@ -159,6 +159,13 @@ export function Dashboard({
 
   const load = useCallback(
     async (signal?: AbortSignal, opts?: { silent?: boolean }) => {
+      if (wallets.length === 0) {
+        setData(null);
+        setError(null);
+        setLoading(false);
+        paintedKey.current = null;
+        return;
+      }
       if (!opts?.silent) {
         setLoading(true);
         setError(null);
@@ -206,29 +213,38 @@ export function Dashboard({
     return () => ac.abort();
   }, [hydrated, load, wallets]);
 
+  useEffect(() => {
+    if (!hydrated || wallets.length === 0) return;
+    const id = window.setInterval(() => {
+      void load(undefined, { silent: true });
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [hydrated, wallets.length, load]);
+
   function update(next: WatchWallet[]) {
     setWallets(next);
     persist(next);
     writeUrl(next);
   }
 
-  function addParsed() {
-    const parts = paste.split(/[\s,;]+/g).map((s) => s.trim()).filter(Boolean);
-    if (parts.length === 0) return;
-    const next = [...wallets];
-    const have = new Set(next.map((w) => w.address));
-    for (const p of parts) {
-      try {
-        const pk = new PublicKey(p).toBase58();
-        if (have.has(pk)) continue;
-        have.add(pk);
-        next.push({ address: pk, label: `Wallet ${next.length + 1}` });
-      } catch {
-        // skip invalid
+  function addWallet() {
+    const raw = addressInput.trim();
+    if (!raw) return;
+    try {
+      const pk = new PublicKey(raw).toBase58();
+      if (wallets.some((w) => w.address === pk)) {
+        setAddError("That wallet is already in the list.");
+        return;
       }
+      const label =
+        labelInput.trim() || `Wallet ${wallets.length + 1}`;
+      update([...wallets, { address: pk, label }]);
+      setAddressInput("");
+      setLabelInput("");
+      setAddError(null);
+    } catch {
+      setAddError("Not a valid Solana address.");
     }
-    setPaste("");
-    update(next);
   }
 
   function addConnected() {
@@ -242,9 +258,10 @@ export function Dashboard({
     update(wallets.filter((w) => w.address !== address));
   }
 
-  function restoreDefaults() {
-    const next = defaultWallets();
-    update(next);
+  function clearWallets() {
+    update([]);
+    setData(null);
+    setError(null);
   }
 
   const connectedInView =
@@ -259,7 +276,7 @@ export function Dashboard({
             <span className="cursor-blink inline-block h-[11px] w-[7px] rounded-[1px] bg-brand" />
           </div>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            Read-only inspector · cannot move funds
+            Desks, vault stock, and yield
           </p>
         </div>
         <nav className="ml-auto flex shrink-0 items-center gap-3">
@@ -286,26 +303,11 @@ export function Dashboard({
         </nav>
       </header>
 
-      <Alert className="border-phos/40 bg-phos/10 text-ink">
-        <ShieldCheck className="size-4 text-phos" />
-        <AlertTitle className="text-[12px] uppercase tracking-[0.12em]">
-          Watch-only
-        </AlertTitle>
-        <AlertDescription className="text-[12px] leading-relaxed text-muted-foreground">
-          This app is MIT-licensed, talks to a public Solana RPC, and never
-          holds private keys. Optional wallet connect (Phantom, Solana Mobile,
-          Seeker) only reads your public address — there are no transfer, swap,
-          approve, or mint instructions in this codebase. Paste-only lookup
-          works without connecting.
-        </AlertDescription>
-      </Alert>
-
       <div className="mt-4 grid gap-4">
         <Frame title="Wallets" live>
           <p className="mb-3 text-[12px] leading-relaxed text-muted-foreground">
-            Combine desks on one wallet with $OTC on another. Defaults are the
-            public Seeker desk wallet and the Fomo $OTC wallet. Saved in
-            localStorage; the URL is shareable.
+            Add one wallet at a time. This browser remembers the list for next
+            visit; the URL is shareable.
           </p>
           <div className="flex flex-wrap gap-1.5">
             {wallets.map((w) => (
@@ -335,45 +337,81 @@ export function Dashboard({
             ))}
             {wallets.length === 0 ? (
               <span className="text-[12px] text-muted-foreground">
-                No wallets in view.
+                No wallets yet — add an address to start.
               </span>
             ) : null}
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
-            <Textarea
-              value={paste}
-              onChange={(e) => setPaste(e.target.value)}
-              placeholder="Paste one or more Solana addresses"
-              className="min-h-[72px] border-line bg-well font-mono text-[12px]"
-            />
-            <div className="flex flex-col gap-1.5">
-              <Button type="button" onClick={addParsed} disabled={!paste.trim()}>
+          <form
+            className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,160px)_minmax(0,1fr)_auto]"
+            onSubmit={(e) => {
+              e.preventDefault();
+              addWallet();
+            }}
+          >
+            <div className="grid gap-1">
+              <Label htmlFor="wallet-name" className="text-[11px] text-muted-foreground">
+                Name
+              </Label>
+              <Input
+                id="wallet-name"
+                value={labelInput}
+                onChange={(e) => setLabelInput(e.target.value)}
+                placeholder="e.g. Trading"
+                className="border-line bg-well text-[12px]"
+              />
+            </div>
+            <div className="grid gap-1">
+              <Label htmlFor="wallet-address" className="text-[11px] text-muted-foreground">
+                Address
+              </Label>
+              <Input
+                id="wallet-address"
+                value={addressInput}
+                onChange={(e) => {
+                  setAddressInput(e.target.value);
+                  if (addError) setAddError(null);
+                }}
+                placeholder="Solana address"
+                className="border-line bg-well font-mono text-[12px]"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="flex items-end">
+              <Button type="submit" disabled={!addressInput.trim()}>
                 <Plus />
-                Add pasted
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setVisible(true)}
-              >
-                <Wallet />
-                {connected ? "Connected" : "Connect (read-only)"}
-              </Button>
-              {connected && publicKey && !connectedInView ? (
-                <Button type="button" variant="outline" onClick={addConnected}>
-                  Add {shortAddress(publicKey.toBase58())}
-                </Button>
-              ) : null}
-              {connected ? (
-                <Button type="button" variant="ghost" onClick={() => disconnect()}>
-                  <Unplug />
-                  Disconnect
-                </Button>
-              ) : null}
-              <Button type="button" variant="ghost" onClick={restoreDefaults}>
-                Restore defaults
+                Add wallet
               </Button>
             </div>
+          </form>
+          {addError ? (
+            <p className="mt-1.5 text-[11px] text-alert">{addError}</p>
+          ) : null}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setVisible(true)}
+            >
+              <Wallet />
+              {connected ? "Connected" : "Connect"}
+            </Button>
+            {connected && publicKey && !connectedInView ? (
+              <Button type="button" variant="outline" onClick={addConnected}>
+                Add {shortAddress(publicKey.toBase58())}
+              </Button>
+            ) : null}
+            {connected ? (
+              <Button type="button" variant="ghost" onClick={() => disconnect()}>
+                <Unplug />
+                Disconnect
+              </Button>
+            ) : null}
+            {wallets.length > 0 ? (
+              <Button type="button" variant="ghost" onClick={clearWallets}>
+                Clear list
+              </Button>
+            ) : null}
           </div>
         </Frame>
 
@@ -400,25 +438,27 @@ export function Dashboard({
           </Alert>
         ) : null}
 
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[11px] text-muted-foreground">
-            {data
-              ? `On-chain snapshot · ${new Date(data.fetchedAt).toLocaleTimeString()}`
-              : loading
-                ? "Reading program accounts…"
-                : "—"}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void load()}
-            disabled={loading}
-          >
-            {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-            Refresh
-          </Button>
-        </div>
+        {wallets.length > 0 || data || error || loading ? (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] text-muted-foreground">
+              {data
+                ? `On-chain snapshot · ${new Date(data.fetchedAt).toLocaleTimeString()}`
+                : loading
+                  ? "Reading program accounts…"
+                  : "—"}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void load()}
+              disabled={loading || wallets.length === 0}
+            >
+              {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              Refresh
+            </Button>
+          </div>
+        ) : null}
 
         {loading && !data ? <LoadingState /> : null}
         {data ? <Results data={data} /> : null}
@@ -443,7 +483,8 @@ function LoadingState() {
 
 function Results({ data }: { data: PortfolioResponse }) {
   const y = data.yield;
-  const nextDeskEmpty = data.desks.length === 0;
+  const desks = [...data.desks].sort((a, b) => a.serial - b.serial);
+  const nextDeskEmpty = desks.length === 0;
 
   return (
     <>
@@ -512,12 +553,8 @@ function Results({ data }: { data: PortfolioResponse }) {
           </Badge>
         }
       >
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <MiniStat label="Est. APR" value={fmtPct(y.apr)} />
-          <MiniStat
-            label="Est. APY"
-            value={y.apy == null ? "cannot compute yet" : fmtPct(y.apy)}
-          />
           <MiniStat
             label="USD / live desk"
             value={fmtUsd(y.usdPerLiveDesk)}
@@ -534,11 +571,8 @@ function Results({ data }: { data: PortfolioResponse }) {
         <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
           {y.status === "ok"
             ? y.reason ??
-              "Annualized from on-chain acquired stock, live desk count, time since first mint, and spot prices versus mint cost (burned OTC + surcharge)."
+              "Simple APR from paid-to-holders vs mint cost. Not a published rate."
             : y.reason}
-        </p>
-        <p className="mt-2 font-mono text-[10.5px] leading-relaxed text-muted-foreground">
-          {y.formula}
         </p>
         {y.yearsElapsed != null ? (
           <p className="mt-1 text-[11px] text-muted-foreground">
@@ -631,104 +665,9 @@ function Results({ data }: { data: PortfolioResponse }) {
             claim on vault stock.
           </p>
         ) : (
-          <div className="grid gap-3">
-            {data.desks.map((desk) => (
-              <div
-                key={desk.asset}
-                className="rounded-lg border border-line bg-well/40 px-3 py-3"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="tnum text-[14px] font-bold text-ink">
-                    {desk.name}
-                  </span>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "text-[9px] uppercase tracking-[0.08em]",
-                      desk.activated
-                        ? "border-phos/40 bg-phos/10 text-phos"
-                        : "border-gold/40 text-gold",
-                    )}
-                  >
-                    {desk.activated ? "Live" : "Needs activate"}
-                  </Badge>
-                  <span className="tnum ml-auto text-[16px] font-bold text-ink">
-                    {fmtUsd(desk.heldUsd + desk.owedUsd)}
-                  </span>
-                </div>
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                  <span>Burned {fmtOtc(desk.depositOtc)}</span>
-                  <span>Minted {fmtTime(desk.mintedAt)}</span>
-                  <a
-                    className="inline-flex items-center gap-0.5 hover:text-head"
-                    href={magicEdenItem(desk.asset)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Magic Eden <ExternalLink className="size-3" />
-                  </a>
-                  <a
-                    className="inline-flex items-center gap-0.5 hover:text-head"
-                    href={solscanAccount(desk.vault)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Vault <ExternalLink className="size-3" />
-                  </a>
-                </div>
-                <div className="mt-2 grid gap-1">
-                  {desk.slots.map((slot) => {
-                    const qty = slot.held + slot.owed;
-                    const empty = qty === 0;
-                    return (
-                      <div
-                        key={slot.mint}
-                        className="flex items-center gap-2 text-[11.5px]"
-                      >
-                        <span
-                          className={cn(
-                            "w-[88px] shrink-0 font-medium",
-                            empty ? "text-muted-foreground/60" : "text-ink",
-                          )}
-                        >
-                          {slot.symbol}
-                        </span>
-                        <span
-                          className={cn(
-                            "tnum grow text-right",
-                            empty ? "text-muted-foreground/50" : "text-muted-foreground",
-                          )}
-                        >
-                          {fmtNum(qty, { max: 6 })}
-                          {slot.owed > 0 ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="ml-1 text-gold">·owed</span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {fmtNum(slot.owed, { max: 6 })} credited
-                                (counter − stamp) and not yet swept into the
-                                vault ATA.
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : null}
-                        </span>
-                        <span
-                          className={cn(
-                            "tnum w-[72px] shrink-0 text-right",
-                            empty ? "text-muted-foreground/50" : "text-ink",
-                          )}
-                        >
-                          {empty ? "—" : fmtUsd(slot.usd)}
-                        </span>
-                        {!slot.open ? (
-                          <span className="text-[10px] text-gold">closed</span>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+          <div className="grid gap-2">
+            {desks.map((desk) => (
+              <DeskRow key={desk.asset} desk={desk} />
             ))}
           </div>
         )}
@@ -742,33 +681,107 @@ function Results({ data }: { data: PortfolioResponse }) {
           </AlertDescription>
         </Alert>
       ) : null}
-
-      <Frame title="How this stays read-only">
-        <ul className="list-disc space-y-2 pl-4 text-[12px] leading-relaxed text-muted-foreground">
-          <li>
-            Open source under MIT. Clone it, grep for{" "}
-            <code className="rounded bg-well px-1">Transaction</code> — this
-            UI never builds one.
-          </li>
-          <li>
-            Reads go to {data.rpc} from a server route. No secrets are required
-            to run. Override with <code>SOLANA_RPC_URL</code> if the public
-            endpoint rate-limits you.
-          </li>
-          <li>
-            Vault PDAs are <code>[&quot;vault&quot;, asset]</code> on{" "}
-            <span className="tnum">{shortAddress(data.protocol.program, 6)}</span>
-            , same as the live program. Stock accounts are Token-2022 ATAs of
-            that vault.
-          </li>
-          <li>
-            Wallet adapter connect may show a signature request from the
-            wallet itself (a connect message). This app never asks you to sign a
-            transfer.
-          </li>
-        </ul>
-      </Frame>
     </>
+  );
+}
+
+function DeskRow({ desk }: { desk: DeskHolding }) {
+  const totalUsd = desk.heldUsd + desk.owedUsd;
+  return (
+    <details className="group/desk rounded-lg border border-line bg-well/40 open:bg-well/55">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open/desk:rotate-180" />
+        <span className="tnum text-[14px] font-bold text-ink">#{desk.serial}</span>
+        <Badge
+          variant="outline"
+          className={cn(
+            "text-[9px] uppercase tracking-[0.08em]",
+            desk.activated
+              ? "border-phos/40 bg-phos/10 text-phos"
+              : "border-gold/40 text-gold",
+          )}
+        >
+          {desk.activated ? "Live" : "Needs activate"}
+        </Badge>
+        <span className="tnum ml-auto text-[15px] font-bold text-ink">
+          {fmtUsd(totalUsd)}
+        </span>
+      </summary>
+      <div className="border-t border-line px-3 py-3">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <span>Burned {fmtOtc(desk.depositOtc)}</span>
+          <span>Minted {fmtTime(desk.mintedAt)}</span>
+          <a
+            className="inline-flex items-center gap-0.5 hover:text-head"
+            href={magicEdenItem(desk.asset)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Magic Eden <ExternalLink className="size-3" />
+          </a>
+          <a
+            className="inline-flex items-center gap-0.5 hover:text-head"
+            href={solscanAccount(desk.vault)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Vault <ExternalLink className="size-3" />
+          </a>
+        </div>
+        <div className="mt-2 grid gap-1">
+          {desk.slots.map((slot) => {
+            const qty = slot.held + slot.owed;
+            const empty = qty === 0;
+            return (
+              <div
+                key={slot.mint}
+                className="flex items-center gap-2 text-[11.5px]"
+              >
+                <span
+                  className={cn(
+                    "w-[88px] shrink-0 font-medium",
+                    empty ? "text-muted-foreground/60" : "text-ink",
+                  )}
+                >
+                  {slot.symbol}
+                </span>
+                <span
+                  className={cn(
+                    "tnum grow text-right",
+                    empty ? "text-muted-foreground/50" : "text-muted-foreground",
+                  )}
+                >
+                  {fmtNum(qty, { max: 6 })}
+                  {slot.owed > 0 ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="ml-1 text-gold">·owed</span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {fmtNum(slot.owed, { max: 6 })} credited
+                        (counter − stamp) and not yet swept into the
+                        vault ATA.
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
+                </span>
+                <span
+                  className={cn(
+                    "tnum w-[72px] shrink-0 text-right",
+                    empty ? "text-muted-foreground/50" : "text-ink",
+                  )}
+                >
+                  {empty ? "—" : fmtUsd(slot.usd)}
+                </span>
+                {!slot.open ? (
+                  <span className="text-[10px] text-gold">closed</span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </details>
   );
 }
 

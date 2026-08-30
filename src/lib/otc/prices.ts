@@ -38,7 +38,7 @@ async function fillDexscreener(
     const url = `https://api.dexscreener.com/latest/dex/tokens/${chunk.join(",")}`;
     try {
       const res = await fetch(url, {
-        headers: { "user-agent": "otc-desk-vaults/1.0 (read-only dashboard)" },
+        headers: { "user-agent": "otc-desk-vaults/1.0" },
         next: { revalidate: 60 },
       });
       if (!res.ok) continue;
@@ -79,7 +79,7 @@ async function fillCoinGeckoSol(prices: Record<string, number>) {
     const res = await fetch(
       "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
       {
-        headers: { "user-agent": "otc-desk-vaults/1.0 (read-only dashboard)" },
+        headers: { "user-agent": "otc-desk-vaults/1.0" },
         next: { revalidate: 60 },
       },
     );

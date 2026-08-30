@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "OTC Desk Vaults",
   description:
-    "Read-only dashboard for OTC Desks on Solana. Inspect $OTC, NFT desks, vault stock, and derived yield. Cannot move funds.",
+    "Inspect $OTC, NFT desks, vault stock, and derived yield on OTC Desks.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

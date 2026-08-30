@@ -242,8 +242,7 @@ async function loadPortfolioFrom(
   const estimatedAnnualUsd =
     yld.status === "ok" &&
     apr != null &&
-    mintCostUsd != null &&
-    yld.apy != null
+    mintCostUsd != null
       ? liveDesks * apr * mintCostUsd
       : null;
 

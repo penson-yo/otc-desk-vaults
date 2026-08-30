@@ -131,16 +131,5 @@ export function stockMeta(mint: string): StockMeta {
   );
 }
 
-export const DEFAULT_WATCH_WALLETS = [
-  {
-    address: "ALthNNeegniQz1XUeKzu1ej5P4FJEodXqmpugfgPVAHS",
-    label: "Seeker",
-  },
-  {
-    address: "6ChksV4svsK7KUE26uNugS44q47g6sQFCq5qVyogXxkp",
-    label: "Fomo Sol",
-  },
-] as const;
-
 export const WATCH_STORAGE_KEY = "otc-vaults-watch";
 export const THEME_STORAGE_KEY = "theme";

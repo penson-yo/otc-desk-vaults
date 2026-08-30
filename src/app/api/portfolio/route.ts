@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DEFAULT_WATCH_WALLETS, PUBLIC_RPC } from "@/lib/otc/constants";
+import { PUBLIC_RPC } from "@/lib/otc/constants";
 import { loadPortfolio } from "@/lib/otc/portfolio";
 import type { WatchWallet } from "@/lib/otc/types";
 
@@ -17,13 +17,17 @@ export async function GET(req: NextRequest) {
   const addresses = [...raw, ...fromCsv];
   const labels = url.searchParams.getAll("label");
 
-  const wallets: WatchWallet[] =
-    addresses.length > 0
-      ? addresses.map((address, i) => ({
-          address,
-          label: labels[i] || `Wallet ${i + 1}`,
-        }))
-      : DEFAULT_WATCH_WALLETS.map((w) => ({ ...w }));
+  if (addresses.length === 0) {
+    return NextResponse.json(
+      { error: "Provide at least one address" },
+      { status: 400 },
+    );
+  }
+
+  const wallets: WatchWallet[] = addresses.map((address, i) => ({
+    address,
+    label: labels[i] || `Wallet ${i + 1}`,
+  }));
 
   try {
     const data = await loadPortfolio(wallets);
