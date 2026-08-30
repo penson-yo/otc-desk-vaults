@@ -22,21 +22,34 @@ export function vaultPda(asset: PublicKey): PublicKey {
   )[0];
 }
 
-/** Token-2022 ATA owned by the vault PDA (owner is off-curve). */
-export function vaultStockAta(vault: PublicKey, stockMint: PublicKey): PublicKey {
+/** Token-2022 ATA of any owner (vault/config PDAs set allowOwnerOffCurve). */
+export function token2022Ata(
+  owner: PublicKey,
+  mint: PublicKey,
+  allowOwnerOffCurve = false,
+): PublicKey {
   return getAssociatedTokenAddressSync(
-    stockMint,
-    vault,
-    true,
+    mint,
+    owner,
+    allowOwnerOffCurve,
     TOKEN_2022_PROGRAM_ID,
   );
 }
 
+/** Token-2022 ATA owned by the vault PDA (owner is off-curve). */
+export function vaultStockAta(vault: PublicKey, stockMint: PublicKey): PublicKey {
+  return token2022Ata(vault, stockMint, true);
+}
+
+/** Token-2022 ATA owned by the config PDA — the shared distribute/sweep pool. */
+export function poolStockAta(config: PublicKey, stockMint: PublicKey): PublicKey {
+  return token2022Ata(config, stockMint, true);
+}
+
 export function otcAta(owner: PublicKey, otcMint: PublicKey): PublicKey {
-  return getAssociatedTokenAddressSync(
-    otcMint,
-    owner,
-    false,
-    TOKEN_2022_PROGRAM_ID,
-  );
+  return token2022Ata(owner, otcMint, false);
+}
+
+export function userStockAta(owner: PublicKey, stockMint: PublicKey): PublicKey {
+  return token2022Ata(owner, stockMint, false);
 }
