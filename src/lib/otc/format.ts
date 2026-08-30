@@ -64,6 +64,16 @@ export function uiAmount(raw: bigint, decimals: number): number {
   return whole + frac;
 }
 
+/** Best-effort UI → raw. Prefer on-chain amounts for swaps. */
+export function uiToRaw(ui: number, decimals: number): bigint {
+  if (!Number.isFinite(ui) || ui <= 0) return 0n;
+  const den = 10n ** BigInt(decimals);
+  const scaled = ui * Number(den);
+  if (!Number.isFinite(scaled)) return 0n;
+  const raw = BigInt(Math.round(scaled));
+  return raw < 0n ? 0n : raw;
+}
+
 export function solscanAccount(address: string): string {
   return `https://solscan.io/account/${address}`;
 }

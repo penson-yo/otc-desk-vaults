@@ -1,0 +1,7 @@
+/* Loaded after wallet-adapter-react-ui/styles.css. The modal starts at
+   opacity 0 and transitions to 1; Tailwind/preflight can leave that
+   transition stuck so Connect looks like a no-op. */
+.wallet-adapter-modal.wallet-adapter-modal-fade-in {
+  opacity: 1 !important;
+  transition: none !important;
+}

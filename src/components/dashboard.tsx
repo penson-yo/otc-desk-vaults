@@ -16,6 +16,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Frame } from "@/components/frame";
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  ClaimButtons,
+  ClaimProgress,
+  ClaimProvider,
+} from "@/components/claim-actions";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -268,6 +273,12 @@ export function Dashboard({
     publicKey && wallets.some((w) => w.address === publicKey.toBase58());
 
   return (
+    <ClaimProvider
+      data={data}
+      connectedInView={!!connectedInView}
+      loading={loading}
+      onRefresh={() => load(undefined, { silent: true })}
+    >
     <div className="mx-auto flex min-h-screen w-full max-w-[980px] flex-col px-4 pb-24 sm:px-5">
       <header className="flex h-[68px] shrink-0 items-center gap-3">
         <div className="min-w-0">
@@ -407,12 +418,14 @@ export function Dashboard({
                 Disconnect
               </Button>
             ) : null}
+            <ClaimButtons />
             {wallets.length > 0 ? (
               <Button type="button" variant="ghost" onClick={clearWallets}>
                 Clear list
               </Button>
             ) : null}
           </div>
+          <ClaimProgress />
         </Frame>
 
         {error ? (
@@ -464,6 +477,7 @@ export function Dashboard({
         {data ? <Results data={data} /> : null}
       </div>
     </div>
+    </ClaimProvider>
   );
 }
 
@@ -657,7 +671,10 @@ function Results({ data }: { data: PortfolioResponse }) {
         </div>
       </Frame>
 
-      <Frame title="Desks & vaults">
+      <Frame
+        title="Desks & vaults"
+        action={<ClaimButtons size="sm" />}
+      >
         {nextDeskEmpty ? (
           <p className="text-[12.5px] text-muted-foreground">
             None of these wallets currently hold an OTC Desk NFT. Accrual is
