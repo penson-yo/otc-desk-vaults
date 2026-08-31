@@ -62,6 +62,13 @@ OTC Desks does **not** publish APR. The dashboard derives a historical simple ra
 5. **APR** (simple)  
    `(usdPerLiveDesk / yearsElapsed) / mintCostUsd`
 
+The dashboard also shows daily views:
+
+- **Protocol / desk / day** — `usdPerLiveDesk / daysElapsed`
+- **Your live desks / day** — `estimatedAnnualUsd / 365.25`
+- **Actual since purchase / day** — current-marked claimed and unclaimed
+  rewards divided by the summed ownership days for the currently held desks
+
 If no stock has been acquired, there are no live desks, prices are missing, or the protocol is less than a day old, the UI says **cannot compute yet** and why.
 
 Forward-looking fill (mint surcharge, Magic Eden royalties, pump.fun creator fees) is **not** projected. The pot is not a promise.

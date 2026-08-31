@@ -643,6 +643,18 @@ function Results({
   const y = data.yield;
   const desks = [...data.desks].sort((a, b) => a.serial - b.serial);
   const nextDeskEmpty = desks.length === 0;
+  const protocolDays =
+    y.status === "ok" && y.yearsElapsed != null
+      ? y.yearsElapsed * 365.25
+      : null;
+  const protocolDailyPerDesk =
+    protocolDays != null && protocolDays > 0 && y.usdPerLiveDesk != null
+      ? y.usdPerLiveDesk / protocolDays
+      : null;
+  const yourProtocolDaily =
+    data.totals.estimatedAnnualUsd == null
+      ? null
+      : data.totals.estimatedAnnualUsd / 365.25;
 
   return (
     <>
@@ -740,7 +752,7 @@ function Results({
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <MiniStat label="Est. APR" value={fmtPct(y.apr)} />
           <MiniStat
-            label="USD / live desk"
+            label="Paid / live desk total"
             value={fmtUsd(y.usdPerLiveDesk)}
           />
           <MiniStat
@@ -750,6 +762,26 @@ function Results({
                 ? "—"
                 : fmtUsd(data.totals.estimatedAnnualUsd)
             }
+          />
+        </div>
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <MiniStat
+            label="Protocol / desk / day"
+            value={fmtUsd(protocolDailyPerDesk)}
+            hint="Lifetime protocol run-rate"
+            tone="gold"
+          />
+          <MiniStat
+            label="Your live desks / day"
+            value={fmtUsd(yourProtocolDaily)}
+            hint={`${data.totals.liveDesks} live desk${data.totals.liveDesks === 1 ? "" : "s"} · protocol run-rate`}
+            tone="gold"
+          />
+          <MiniStat
+            label="Actual since purchase / day"
+            value={fmtUsd(breakEven?.dailyRewardsUsd)}
+            hint="Your current-marked rewards · not a forecast"
+            tone="phos"
           />
         </div>
         <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
@@ -765,6 +797,11 @@ function Results({
             {fmtUsd(y.mintCostUsd)}.
           </p>
         ) : null}
+        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+          Protocol daily figures spread lifetime paid-to-holders across days
+          since the first mint. Actual since purchase uses your claimed and
+          unclaimed rewards divided by the combined days you have held each desk.
+        </p>
       </Frame>
 
       <BreakEvenPanel
