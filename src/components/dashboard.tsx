@@ -57,6 +57,7 @@ import {
   solscanAccount,
 } from "@/lib/otc/format";
 import type {
+  BreakEvenResponse,
   DeskHolding,
   MarketSnapshot,
   PortfolioResponse,
@@ -144,6 +145,9 @@ export function Dashboard({
   const [error, setError] = useState<string | null>(initialError);
   const [loading, setLoading] = useState(false);
   const [market, setMarket] = useState<MarketSnapshot | null>(null);
+  const [breakEven, setBreakEven] = useState<BreakEvenResponse | null>(null);
+  const [breakEvenError, setBreakEvenError] = useState<string | null>(null);
+  const [breakEvenLoading, setBreakEvenLoading] = useState(false);
 
   const paintedKey = useRef(
     initialData ? initialData.wallets.map((w) => w.address).join(",") : null,
@@ -219,6 +223,41 @@ export function Dashboard({
     [query, wallets],
   );
 
+  const loadBreakEven = useCallback(
+    async (signal?: AbortSignal) => {
+      if (wallets.length === 0) {
+        setBreakEven(null);
+        setBreakEvenError(null);
+        setBreakEvenLoading(false);
+        return;
+      }
+      setBreakEvenLoading(true);
+      setBreakEvenError(null);
+      const timeout = AbortSignal.timeout(58_000);
+      const combined =
+        signal != null ? AbortSignal.any([signal, timeout]) : timeout;
+      try {
+        const res = await fetch(`/api/breakeven?${query}`, {
+          signal: combined,
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+        setBreakEven(json as BreakEvenResponse);
+      } catch (err) {
+        if ((err as { name?: string }).name === "AbortError") {
+          if (!signal?.aborted) {
+            setBreakEvenError("Break-even history timed out. Try refresh.");
+          }
+          return;
+        }
+        setBreakEvenError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBreakEvenLoading(false);
+      }
+    },
+    [query, wallets.length],
+  );
+
   useEffect(() => {
     if (!hydrated) return;
     const ac = new AbortController();
@@ -227,6 +266,14 @@ export function Dashboard({
     void load(ac.signal, { silent });
     return () => ac.abort();
   }, [hydrated, load, wallets]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const ac = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch when the watched wallets change
+    void loadBreakEven(ac.signal);
+    return () => ac.abort();
+  }, [hydrated, loadBreakEven]);
 
   useEffect(() => {
     if (!hydrated || wallets.length === 0) return;
@@ -301,6 +348,8 @@ export function Dashboard({
     update([]);
     setData(null);
     setError(null);
+    setBreakEven(null);
+    setBreakEvenError(null);
   }
 
   const connectedInView =
@@ -499,7 +548,10 @@ export function Dashboard({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => void load()}
+              onClick={() => {
+                void load();
+                void loadBreakEven();
+              }}
               disabled={loading || wallets.length === 0}
             >
               {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
@@ -509,7 +561,15 @@ export function Dashboard({
         ) : null}
 
         {loading && !data ? <LoadingState /> : null}
-        {data ? <Results data={data} /> : null}
+        {data ? (
+          <Results
+            data={data}
+            breakEven={breakEven}
+            breakEvenError={breakEvenError}
+            breakEvenLoading={breakEvenLoading}
+            onRefreshBreakEven={() => void loadBreakEven()}
+          />
+        ) : null}
       </div>
     </div>
     </ClaimProvider>
@@ -567,7 +627,19 @@ function MarketStrip({ market }: { market: MarketSnapshot | null }) {
   );
 }
 
-function Results({ data }: { data: PortfolioResponse }) {
+function Results({
+  data,
+  breakEven,
+  breakEvenError,
+  breakEvenLoading,
+  onRefreshBreakEven,
+}: {
+  data: PortfolioResponse;
+  breakEven: BreakEvenResponse | null;
+  breakEvenError: string | null;
+  breakEvenLoading: boolean;
+  onRefreshBreakEven: () => void;
+}) {
   const y = data.yield;
   const desks = [...data.desks].sort((a, b) => a.serial - b.serial);
   const nextDeskEmpty = desks.length === 0;
@@ -695,6 +767,13 @@ function Results({ data }: { data: PortfolioResponse }) {
         ) : null}
       </Frame>
 
+      <BreakEvenPanel
+        data={breakEven}
+        error={breakEvenError}
+        loading={breakEvenLoading}
+        onRefresh={onRefreshBreakEven}
+      />
+
       <Frame title="Combined holdings">
         <div className="overflow-x-auto">
           <Table>
@@ -797,6 +876,200 @@ function Results({ data }: { data: PortfolioResponse }) {
         </Alert>
       ) : null}
     </>
+  );
+}
+
+function BreakEvenPanel({
+  data,
+  error,
+  loading,
+  onRefresh,
+}: {
+  data: BreakEvenResponse | null;
+  error: string | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const action = (
+    <div className="flex items-center gap-1.5">
+      <Badge variant="outline" className="border-gold/40 text-gold">
+        Current-price estimate
+      </Badge>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Refresh break-even"
+        onClick={onRefresh}
+        disabled={loading}
+      >
+        {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+      </Button>
+    </div>
+  );
+
+  if (!data && loading) {
+    return (
+      <Frame title="Break-even" action={action}>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <Skeleton key={index} className="h-[76px] bg-well" />
+          ))}
+        </div>
+        <Skeleton className="mt-3 h-28 bg-well" />
+      </Frame>
+    );
+  }
+
+  if (!data) {
+    return (
+      <Frame title="Break-even" action={action}>
+        <p className="text-[12px] text-muted-foreground">
+          {error ?? "No Magic Eden purchase history found for these desks."}
+        </p>
+      </Frame>
+    );
+  }
+
+  const fullInstantExit = data.instantExitDesks === data.basisDesks;
+  const exitHint =
+    data.instantExitSol == null
+      ? "No executable bids found"
+      : `${data.instantExitDesks}/${data.basisDesks} desks have bid depth`;
+
+  return (
+    <Frame title="Break-even" action={action}>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <MiniStat
+          label="Cost basis"
+          value={`${fmtNum(data.costBasisSol, { max: 3, min: 2 })} SOL`}
+          hint={`${fmtUsd(data.costBasisUsd)} at current SOL`}
+        />
+        <MiniStat
+          label="Rewards accrued"
+          value={fmtUsd(data.totalRewardsUsd)}
+          hint={`${fmtUsd(data.claimedRewardsUsd)} claimed · ${fmtUsd(data.unclaimedRewardsUsd)} in vaults`}
+          tone="phos"
+        />
+        <MiniStat
+          label="Floor exit"
+          value={
+            data.floorValueSol == null
+              ? "—"
+              : `${fmtNum(data.floorValueSol, { max: 3 })} SOL`
+          }
+          hint={`With rewards: ${fmtSignedUsd(data.economicPnlUsd)}`}
+          tone={pnlTone(data.economicPnlUsd)}
+        />
+        <MiniStat
+          label="Exit now"
+          value={
+            data.instantExitSol == null
+              ? "—"
+              : `${fmtNum(data.instantExitSol, { max: 3 })} SOL`
+          }
+          hint={
+            fullInstantExit
+              ? `With rewards: ${fmtSignedUsd(data.instantExitEconomicPnlUsd)}`
+              : exitHint
+          }
+          tone={pnlTone(data.instantExitEconomicPnlUsd)}
+        />
+        <MiniStat
+          label="Rewards-only ETA"
+          value={fmtEta(data.rewardsOnlyEtaDays)}
+          hint={
+            data.rewardsOnlyRemainingUsd === 0
+              ? "Cost recovered by rewards"
+              : `${fmtUsd(data.rewardsOnlyRemainingUsd)} left at ${fmtUsd(data.dailyRewardsUsd)}/day`
+          }
+          tone="gold"
+        />
+      </div>
+
+      <div className="mt-3 overflow-x-auto rounded-lg border border-line">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-line hover:bg-transparent">
+              <TableHead>Desk</TableHead>
+              <TableHead className="text-right">Paid</TableHead>
+              <TableHead className="text-right">Rewards</TableHead>
+              <TableHead className="text-right">Floor</TableHead>
+              <TableHead className="text-right">Exit now</TableHead>
+              <TableHead className="text-right">Floor P/L</TableHead>
+              <TableHead className="text-right">Sell</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.desks.map((desk) => (
+              <TableRow key={desk.asset} className="border-line">
+                <TableCell>
+                  <div className="tnum font-bold text-ink">#{desk.serial}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {new Date(desk.purchasedAt * 1_000).toLocaleDateString()}
+                  </div>
+                </TableCell>
+                <TableCell className="tnum text-right">
+                  {fmtNum(desk.costSol, { max: 3 })} SOL
+                </TableCell>
+                <TableCell className="tnum text-right">
+                  {fmtUsd(desk.totalRewardsUsd)}
+                </TableCell>
+                <TableCell className="tnum text-right">
+                  {fmtUsd(desk.floorUsd)}
+                </TableCell>
+                <TableCell className="tnum text-right">
+                  {desk.assignedExitNetSol == null
+                    ? "—"
+                    : `${fmtNum(desk.assignedExitNetSol, { max: 3 })} SOL`}
+                  {desk.bestBidNetSol != null ? (
+                    <div className="text-[10px] text-muted-foreground">
+                      best {fmtNum(desk.bestBidNetSol, { max: 3 })}
+                    </div>
+                  ) : null}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    "tnum text-right",
+                    desk.economicPnlUsd != null && desk.economicPnlUsd >= 0
+                      ? "text-phos"
+                      : "text-alert",
+                  )}
+                >
+                  {fmtSignedUsd(desk.economicPnlUsd)}
+                </TableCell>
+                <TableCell className="text-right">
+                  <a
+                    href={magicEdenItem(desk.asset)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-head hover:underline"
+                  >
+                    Magic Eden <ExternalLink className="size-3" />
+                  </a>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+        Floor exit assumes every desk sells at the current collection floor.
+        Exit now consumes unique live Magic Eden bid capacity, so one bid is not
+        counted four times. {data.methodology}
+      </p>
+      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+        The links open each desk on Magic Eden. Automatic claim-then-sell is not
+        enabled because Magic Eden does not expose a verified public Core NFT
+        sell builder for this app; no sale will be signed without your wallet.
+      </p>
+      {data.warnings.length > 0 || error ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-gold">
+          {[...data.warnings, ...(error ? [error] : [])].join(" ")}
+        </p>
+      ) : null}
+    </Frame>
   );
 }
 
@@ -951,13 +1224,53 @@ function Stat({
   return <div className={className}>{inner}</div>;
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function MiniStat({
+  label,
+  value,
+  hint,
+  tone = "ink",
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "ink" | "phos" | "gold" | "alert";
+}) {
+  const color =
+    tone === "phos"
+      ? "text-phos"
+      : tone === "gold"
+        ? "text-gold"
+        : tone === "alert"
+          ? "text-alert"
+          : "text-ink";
   return (
     <div className="rounded-lg border border-line bg-well px-3 py-2">
       <div className="text-[8px] uppercase tracking-[0.12em] text-muted-foreground">
         {label}
       </div>
-      <div className="tnum mt-1 text-[16px] font-bold text-ink">{value}</div>
+      <div className={cn("tnum mt-1 text-[16px] font-bold", color)}>{value}</div>
+      {hint ? (
+        <div className="mt-1 text-[10px] leading-snug text-muted-foreground">
+          {hint}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function fmtSignedUsd(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value >= 0 ? "+" : "−"}${fmtUsd(Math.abs(value))}`;
+}
+
+function fmtEta(days: number | null): string {
+  if (days == null || !Number.isFinite(days)) return "—";
+  if (days <= 0) return "Recovered";
+  if (days < 1) return `${Math.max(1, Math.round(days * 24))} hr`;
+  return `${fmtNum(days, { max: 1 })} days`;
+}
+
+function pnlTone(value: number | null): "ink" | "phos" | "alert" {
+  if (value == null) return "ink";
+  return value >= 0 ? "phos" : "alert";
 }

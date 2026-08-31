@@ -92,6 +92,59 @@ export type MarketSnapshot = {
   collectionSymbol: string;
 };
 
+export type ClaimedReward = {
+  mint: string;
+  symbol: string;
+  amount: number;
+  usd: number;
+};
+
+export type DeskBreakEven = {
+  wallet: string;
+  asset: string;
+  vault: string;
+  serial: number;
+  purchasedAt: number;
+  costSol: number;
+  costUsd: number;
+  floorUsd: number | null;
+  claimedRewardsUsd: number;
+  unclaimedRewardsUsd: number;
+  totalRewardsUsd: number;
+  economicPnlUsd: number | null;
+  bestBidSol: number | null;
+  bestBidNetSol: number | null;
+  bestBidExpiresAt: number | null;
+  assignedExitNetSol: number | null;
+  rewards: ClaimedReward[];
+};
+
+export type BreakEvenResponse = {
+  fetchedAt: number;
+  status: "ok" | "partial" | "unavailable";
+  basisDesks: number;
+  currentDesks: number;
+  costBasisSol: number;
+  costBasisUsd: number;
+  floorValueSol: number | null;
+  floorValueUsd: number | null;
+  instantExitSol: number | null;
+  instantExitUsd: number | null;
+  instantExitEconomicPnlUsd: number | null;
+  instantExitDesks: number;
+  claimedRewardsUsd: number;
+  unclaimedRewardsUsd: number;
+  totalRewardsUsd: number;
+  economicPnlUsd: number | null;
+  rewardsOnlyRemainingUsd: number;
+  dailyRewardsUsd: number | null;
+  rewardsOnlyEtaDays: number | null;
+  deskDays: number;
+  desks: DeskBreakEven[];
+  warnings: string[];
+  methodology: string;
+};
+
 export type PortfolioResponse = {
   fetchedAt: number;
   rpc: string;

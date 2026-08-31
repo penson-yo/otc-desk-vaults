@@ -6,6 +6,7 @@ Dashboard for [OTC Desks](https://otcdesks.cash) on Solana.
 - Desks (Metaplex Core NFTs) and whether they are activated
 - Per-desk **vault** stock (held + credited but not yet swept)
 - **Estimated APR**, labeled as derived — OTC Desks does not publish a rate
+- **Break-even** from Magic Eden cost basis, claimed rewards, floor, and live bid depth
 
 Protocol docs: [otcdesks.cash/docs](https://otcdesks.cash/docs) · X [@OTCDesks](https://x.com/OTCDesks)
 
@@ -72,6 +73,30 @@ Per-desk vault contents:
   Credited by rounds, delivered later by `distribute` / `sweep`
 
 Unactivated desks still accrue `owed` from mint, but rounds skip paying the ATA until ticker accounts are opened.
+
+## Break-even and exit values
+
+For desks currently held by a watched wallet, the dashboard matches the latest
+Magic Eden `buyNow` activity for cost basis. It scans post-purchase Solana token
+transfers from each desk vault to the buyer, values those claimed rewards at
+current spot prices, and adds stock still held or owed in the vault.
+
+Two exit views are deliberately separate:
+
+- **Floor exit** — every desk valued at the live collection floor. This is a
+  patient-sale estimate, not an executable quote.
+- **Exit now** — live Magic Eden MMM `buyPriceTaker` offers allocated across
+  unique pool capacity. One pool bid is never multiplied across every desk.
+
+The rewards-only ETA extrapolates the wallet's current-marked reward value since
+each purchase. It is historical run-rate math, not a forecast. Claimed token
+value, floor value, and SOL-denominated cost basis all move with spot prices.
+
+Per-desk links open the asset on Magic Eden. The app does not construct an
+automatic NFT sale: Magic Eden instruction endpoints require authenticated,
+marketplace-supported transaction builders, and no Core NFT sell builder has
+been verified for these desks. Claiming and selling therefore remain separate,
+wallet-approved actions.
 
 ## On-chain layout
 
