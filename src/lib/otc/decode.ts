@@ -1,7 +1,10 @@
 import { PublicKey } from "@solana/web3.js";
 import {
+  CONFIG_EXT_DISCRIMINATOR,
+  EXTENDED_TICKER_CAPACITY,
   CONFIG_DISCRIMINATOR,
   TICKER_COUNT,
+  VAULT_EXT_DISCRIMINATOR,
   VAULT_DISCRIMINATOR,
 } from "./constants";
 
@@ -48,6 +51,22 @@ export type OtcVault = {
   bump: number;
 };
 
+export type OtcConfigExt = {
+  stockMints: string[];
+  counter: bigint[];
+  acquired: bigint[];
+  distributed: bigint[];
+  addedAt: bigint[];
+  bump: number;
+};
+
+export type OtcVaultExt = {
+  stamp: bigint[];
+  openAtas: number;
+  slotCount: number;
+  bump: number;
+};
+
 class Cursor {
   o = 0;
   constructor(readonly buf: Buffer) {}
@@ -59,6 +78,11 @@ class Cursor {
   u16() {
     const v = this.buf.readUInt16LE(this.o);
     this.o += 2;
+    return v;
+  }
+  u32() {
+    const v = this.buf.readUInt32LE(this.o);
+    this.o += 4;
     return v;
   }
   u64() {
@@ -155,6 +179,66 @@ export function decodeVault(data: Buffer): OtcVault {
   const traits = [c.u8(), c.u8(), c.u8(), c.u8()];
   const bump = c.u8();
   return { stamp, deposit, mintedAt, serial, openAtas, traits, bump };
+}
+
+export function decodeConfigExt(data: Buffer): OtcConfigExt {
+  if (
+    data.length < 8 ||
+    !bufEqual(data.subarray(0, 8), CONFIG_EXT_DISCRIMINATOR)
+  ) {
+    throw new Error("Not an OTC ConfigExt account");
+  }
+  const c = new Cursor(data);
+  c.o = 8;
+  const stockMints = Array.from(
+    { length: EXTENDED_TICKER_CAPACITY },
+    () => c.pubkey(),
+  );
+  const counter = Array.from(
+    { length: EXTENDED_TICKER_CAPACITY },
+    () => c.u128(),
+  );
+  const acquired = Array.from(
+    { length: EXTENDED_TICKER_CAPACITY },
+    () => c.u64(),
+  );
+  const distributed = Array.from(
+    { length: EXTENDED_TICKER_CAPACITY },
+    () => c.u64(),
+  );
+  const addedAt = Array.from(
+    { length: EXTENDED_TICKER_CAPACITY },
+    () => c.i64(),
+  );
+  return {
+    stockMints,
+    counter,
+    acquired,
+    distributed,
+    addedAt,
+    bump: c.u8(),
+  };
+}
+
+export function decodeVaultExt(data: Buffer): OtcVaultExt {
+  if (
+    data.length < 8 ||
+    !bufEqual(data.subarray(0, 8), VAULT_EXT_DISCRIMINATOR)
+  ) {
+    throw new Error("Not an OTC VaultExt account");
+  }
+  const c = new Cursor(data);
+  c.o = 8;
+  const stamp = Array.from(
+    { length: EXTENDED_TICKER_CAPACITY },
+    () => c.u128(),
+  );
+  return {
+    stamp,
+    openAtas: c.u32(),
+    slotCount: c.u8(),
+    bump: c.u8(),
+  };
 }
 
 /** Metaplex Core AssetV1: key u8, owner 32, update_authority enum, name, uri. */

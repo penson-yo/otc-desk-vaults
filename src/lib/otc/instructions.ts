@@ -10,8 +10,14 @@ import {
   TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 import { Buffer } from "buffer";
-import { PROGRAM_ID } from "./constants";
-import { poolStockAta, userStockAta, vaultStockAta } from "./pda";
+import { PROGRAM_ID, TICKER_COUNT } from "./constants";
+import {
+  configExtPda,
+  poolStockAta,
+  userStockAta,
+  vaultExtPda,
+  vaultStockAta,
+} from "./pda";
 
 /** `claim` — drain one vault ticker into the holder wallet; leave ATA open. */
 export const CLAIM_DISCRIMINATOR = Uint8Array.from([
@@ -46,6 +52,11 @@ function meta(
   return { pubkey, isSigner, isWritable };
 }
 
+/** Anchor optional accounts use the program ID as the `None` sentinel. */
+function extensionAccount(index: number, account: PublicKey): PublicKey {
+  return index < TICKER_COUNT ? PROGRAM_ID : account;
+}
+
 export type ClaimAccounts = {
   user: PublicKey;
   config: PublicKey;
@@ -64,8 +75,10 @@ export function claimInstruction(args: ClaimAccounts): TransactionInstruction {
     keys: [
       meta(args.user, true, true),
       meta(args.config, false),
+      meta(extensionAccount(args.index, configExtPda()), false),
       meta(args.asset, false),
       meta(args.vault, true),
+      meta(extensionAccount(args.index, vaultExtPda(args.vault)), true),
       meta(args.stockMint, false),
       meta(nftStock, true),
       meta(userStock, true),
@@ -93,7 +106,12 @@ export function distributeInstruction(
     data: Buffer.from(indexData(DISTRIBUTE_DISCRIMINATOR, args.index)),
     keys: [
       meta(args.config, true),
+      meta(
+        extensionAccount(args.index, configExtPda()),
+        args.index >= TICKER_COUNT,
+      ),
       meta(args.vault, true),
+      meta(extensionAccount(args.index, vaultExtPda(args.vault)), true),
       meta(args.stockMint, false),
       meta(pool, true),
       meta(nftStock, true),
@@ -119,7 +137,12 @@ export function sweepInstruction(args: SweepAccounts): TransactionInstruction {
     keys: [
       meta(args.payer, true, true),
       meta(args.config, true),
+      meta(
+        extensionAccount(args.index, configExtPda()),
+        args.index >= TICKER_COUNT,
+      ),
       meta(args.vault, true),
+      meta(extensionAccount(args.index, vaultExtPda(args.vault)), true),
       meta(args.stockMint, false),
       meta(pool, true),
       meta(nftStock, true),

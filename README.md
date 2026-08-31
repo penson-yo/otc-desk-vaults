@@ -73,20 +73,25 @@ Per-desk vault contents:
 
 Unactivated desks still accrue `owed` from mint, but rounds skip paying the ATA until ticker accounts are opened.
 
-## On-chain layout (from the program IDL)
+## On-chain layout
 
 Program `AjMx5My4YUDHMiCtLpTAtgkiUJgrpJnQqd5AcQnddHQW` (`otcdesks` 0.1.0).
 
 | Account | PDA seeds |
 | --- | --- |
 | Config | `["config"]` |
+| Extended ticker registry | `["config_ext"]` |
 | SOL pot | `["sol_pot"]` |
 | Vault | `["vault", asset]` |
+| Extended vault state | `["vault_ext", vault]` |
 | Stock in a vault | Token-2022 ATA of the vault (associated token program) |
 
-`$OTC` mint is `Config.token_mint` (pump.fun Token-2022). Collection is `Config.collection`.
+The first ten ticker slots live in Config / Vault. Ticker 11 onward lives in
+ConfigExt / VaultExt; the current eleventh ticker is `$OTC`. `$OTC` mint is
+`Config.token_mint` (pump.fun Token-2022). Collection is `Config.collection`.
 
-The IDL is published on-chain (Anchor). This repo decodes Config / Vault from that spec rather than scraping private HTTP APIs.
+This repo decodes the program accounts directly rather than scraping private
+HTTP APIs.
 
 ## Stack
 

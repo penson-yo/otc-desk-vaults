@@ -1,6 +1,6 @@
 import { WSOL_MINT, stockMeta } from "./constants";
 import { uiAmount } from "./format";
-import type { OtcConfig } from "./decode";
+import type { OtcConfig, OtcConfigExt } from "./decode";
 import { isDefaultMint } from "./decode";
 import type { YieldEstimate } from "./types";
 
@@ -21,20 +21,29 @@ export function mintCostUsd(
 export function paidToHoldersUsd(
   config: OtcConfig,
   prices: Record<string, number>,
+  configExt?: OtcConfigExt | null,
 ): { usd: number; missing: string[] } {
   let usd = 0;
   const missing: string[] = [];
-  for (let i = 0; i < config.stockMints.length; i++) {
-    const mint = config.stockMints[i]!;
-    if (isDefaultMint(mint)) continue;
-    const meta = stockMeta(mint);
-    const price = prices[mint];
-    const amount = uiAmount(config.acquired[i]!, meta.decimals);
-    if (price == null) {
-      if (amount > 0) missing.push(meta.symbol);
-      continue;
+  const sets = [
+    { mints: config.stockMints, acquired: config.acquired },
+    ...(configExt
+      ? [{ mints: configExt.stockMints, acquired: configExt.acquired }]
+      : []),
+  ];
+  for (const set of sets) {
+    for (let i = 0; i < set.mints.length; i++) {
+      const mint = set.mints[i]!;
+      if (isDefaultMint(mint)) continue;
+      const meta = stockMeta(mint, config.tokenMint);
+      const price = prices[mint];
+      const amount = uiAmount(set.acquired[i]!, meta.decimals);
+      if (price == null) {
+        if (amount > 0) missing.push(meta.symbol);
+        continue;
+      }
+      usd += amount * price;
     }
-    usd += amount * price;
   }
   return { usd, missing };
 }
@@ -47,6 +56,7 @@ export function paidToHoldersUsd(
  */
 export function estimateYield(args: {
   config: OtcConfig;
+  configExt?: OtcConfigExt | null;
   prices: Record<string, number>;
   firstMintAt: number | null;
   now: number;
@@ -55,7 +65,11 @@ export function estimateYield(args: {
     "APR = (paid to holders / live desks / years since first mint) / mint cost. Spot prices; not a published rate.";
 
   const holders = Number(args.config.holders);
-  const { usd: paid, missing } = paidToHoldersUsd(args.config, args.prices);
+  const { usd: paid, missing } = paidToHoldersUsd(
+    args.config,
+    args.prices,
+    args.configExt,
+  );
   const cost = mintCostUsd(args.config, args.prices);
   const firstMintAt = args.firstMintAt;
 

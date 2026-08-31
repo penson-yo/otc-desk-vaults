@@ -1,14 +1,20 @@
 import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import {
+  CONFIG_EXT_SEED,
   CONFIG_SEED,
   PROGRAM_ID,
   SOL_POT_SEED,
+  VAULT_EXT_SEED,
   VAULT_SEED,
 } from "./constants";
 
 export function configPda(): PublicKey {
   return PublicKey.findProgramAddressSync([CONFIG_SEED], PROGRAM_ID)[0];
+}
+
+export function configExtPda(): PublicKey {
+  return PublicKey.findProgramAddressSync([CONFIG_EXT_SEED], PROGRAM_ID)[0];
 }
 
 export function solPotPda(): PublicKey {
@@ -18,6 +24,14 @@ export function solPotPda(): PublicKey {
 export function vaultPda(asset: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [VAULT_SEED, asset.toBuffer()],
+    PROGRAM_ID,
+  )[0];
+}
+
+/** Extended per-desk ticker state PDA seeds: ["vault_ext", vault]. */
+export function vaultExtPda(vault: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [VAULT_EXT_SEED, vault.toBuffer()],
     PROGRAM_ID,
   )[0];
 }

@@ -23,7 +23,14 @@ import {
   mintTotals,
   planClaim,
 } from "./claim-plan";
-import { configPda, poolStockAta, userStockAta, vaultStockAta } from "./pda";
+import {
+  configExtPda,
+  configPda,
+  poolStockAta,
+  userStockAta,
+  vaultExtPda,
+  vaultStockAta,
+} from "./pda";
 import {
   hasActiveTransferHook,
   packClaimBatches,
@@ -82,18 +89,20 @@ describe("instruction layouts", () => {
     });
     assert.equal(ix.programId.toBase58(), PROGRAM_ID.toBase58());
     assert.deepEqual(Uint8Array.from(ix.data), Uint8Array.from([...CLAIM_DISCRIMINATOR, 3]));
-    assert.equal(ix.keys.length, 10);
+    assert.equal(ix.keys.length, 12);
     assert.equal(ix.keys[0]!.pubkey.toBase58(), USER.toBase58());
     assert.equal(ix.keys[0]!.isSigner, true);
     assert.equal(ix.keys[0]!.isWritable, true);
     assert.equal(ix.keys[1]!.pubkey.toBase58(), config.toBase58());
     assert.equal(ix.keys[1]!.isWritable, false);
-    assert.equal(ix.keys[2]!.pubkey.toBase58(), ASSET.toBase58());
-    assert.equal(ix.keys[3]!.isWritable, true);
-    assert.equal(ix.keys[5]!.pubkey.toBase58(), vaultStockAta(ASSET, MINT_A).toBase58());
-    assert.equal(ix.keys[6]!.pubkey.toBase58(), userStockAta(USER, MINT_A).toBase58());
-    assert.equal(ix.keys[7]!.pubkey.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58());
-    assert.equal(ix.keys[8]!.pubkey.toBase58(), ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
+    assert.equal(ix.keys[2]!.pubkey.toBase58(), PROGRAM_ID.toBase58());
+    assert.equal(ix.keys[3]!.pubkey.toBase58(), ASSET.toBase58());
+    assert.equal(ix.keys[4]!.isWritable, true);
+    assert.equal(ix.keys[5]!.pubkey.toBase58(), PROGRAM_ID.toBase58());
+    assert.equal(ix.keys[7]!.pubkey.toBase58(), vaultStockAta(ASSET, MINT_A).toBase58());
+    assert.equal(ix.keys[8]!.pubkey.toBase58(), userStockAta(USER, MINT_A).toBase58());
+    assert.equal(ix.keys[9]!.pubkey.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58());
+    assert.equal(ix.keys[10]!.pubkey.toBase58(), ASSOCIATED_TOKEN_PROGRAM_ID.toBase58());
   });
 
   it("serializes distribute with pool ATA of config", () => {
@@ -109,10 +118,12 @@ describe("instruction layouts", () => {
       Uint8Array.from(ix.data),
       Uint8Array.from([...DISTRIBUTE_DISCRIMINATOR, 1]),
     );
-    assert.equal(ix.keys.length, 6);
+    assert.equal(ix.keys.length, 8);
     assert.equal(ix.keys[0]!.isWritable, true);
-    assert.equal(ix.keys[3]!.pubkey.toBase58(), poolStockAta(config, MINT_A).toBase58());
-    assert.equal(ix.keys[4]!.pubkey.toBase58(), vaultStockAta(vault, MINT_A).toBase58());
+    assert.equal(ix.keys[1]!.pubkey.toBase58(), PROGRAM_ID.toBase58());
+    assert.equal(ix.keys[3]!.pubkey.toBase58(), PROGRAM_ID.toBase58());
+    assert.equal(ix.keys[5]!.pubkey.toBase58(), poolStockAta(config, MINT_A).toBase58());
+    assert.equal(ix.keys[6]!.pubkey.toBase58(), vaultStockAta(vault, MINT_A).toBase58());
   });
 
   it("serializes sweep with payer signer and ATA program", () => {
@@ -128,10 +139,38 @@ describe("instruction layouts", () => {
       Uint8Array.from(ix.data),
       Uint8Array.from([...SWEEP_DISCRIMINATOR, 0]),
     );
-    assert.equal(ix.keys.length, 9);
+    assert.equal(ix.keys.length, 11);
     assert.equal(ix.keys[0]!.isSigner, true);
     assert.equal(ix.keys[0]!.isWritable, true);
-    assert.equal(ix.keys[8]!.pubkey.toBase58(), "11111111111111111111111111111111");
+    assert.equal(ix.keys[2]!.pubkey.toBase58(), PROGRAM_ID.toBase58());
+    assert.equal(ix.keys[4]!.pubkey.toBase58(), PROGRAM_ID.toBase58());
+    assert.equal(ix.keys[10]!.pubkey.toBase58(), "11111111111111111111111111111111");
+  });
+
+  it("uses real extension PDAs for ticker 11", () => {
+    const config = configPda();
+    const claim = claimInstruction({
+      user: USER,
+      config,
+      asset: ASSET,
+      vault: ASSET,
+      stockMint: MINT_A,
+      index: 10,
+    });
+    assert.equal(claim.keys[2]!.pubkey.toBase58(), configExtPda().toBase58());
+    assert.equal(claim.keys[2]!.isWritable, false);
+    assert.equal(claim.keys[5]!.pubkey.toBase58(), vaultExtPda(ASSET).toBase58());
+
+    const sweep = sweepInstruction({
+      payer: USER,
+      config,
+      vault: ASSET,
+      stockMint: MINT_A,
+      index: 10,
+    });
+    assert.equal(sweep.keys[2]!.pubkey.toBase58(), configExtPda().toBase58());
+    assert.equal(sweep.keys[2]!.isWritable, true);
+    assert.equal(sweep.keys[4]!.pubkey.toBase58(), vaultExtPda(ASSET).toBase58());
   });
 });
 

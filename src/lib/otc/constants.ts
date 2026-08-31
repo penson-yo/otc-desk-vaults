@@ -21,10 +21,14 @@ export const USDG_DECIMALS = 6;
 
 /** Config PDA seeds: ["config"] */
 export const CONFIG_SEED = Buffer.from("config");
+/** Extended ticker registry PDA seeds: ["config_ext"] */
+export const CONFIG_EXT_SEED = Buffer.from("config_ext");
 /** Pot PDA seeds: ["sol_pot"] */
 export const SOL_POT_SEED = Buffer.from("sol_pot");
 /** Vault PDA seeds: ["vault", asset] */
 export const VAULT_SEED = Buffer.from("vault");
+/** Extended per-desk ticker state PDA seeds: ["vault_ext", vault] */
+export const VAULT_EXT_SEED = Buffer.from("vault_ext");
 
 export const CONFIG_DISCRIMINATOR = Buffer.from([
   155, 12, 170, 224, 30, 250, 204, 130,
@@ -32,12 +36,19 @@ export const CONFIG_DISCRIMINATOR = Buffer.from([
 export const VAULT_DISCRIMINATOR = Buffer.from([
   211, 8, 232, 43, 2, 152, 117, 119,
 ]);
+export const CONFIG_EXT_DISCRIMINATOR = Buffer.from([
+  135, 106, 214, 0, 226, 103, 230, 162,
+]);
+export const VAULT_EXT_DISCRIMINATOR = Buffer.from([
+  214, 34, 226, 166, 218, 56, 129, 146,
+]);
 
 /** counter/stamp scale used by settle/distribute. */
 export const PRECISION = 1_000_000_000_000n;
 
 export const OTC_DECIMALS = 6;
 export const TICKER_COUNT = 10;
+export const EXTENDED_TICKER_CAPACITY = 22;
 export const MAX_SUPPLY = 5_000;
 
 /** Tried in order when SOLANA_RPC_URL is unset. Foundation RPC 403s browsers. */
@@ -149,7 +160,15 @@ export const STOCKS: Record<string, StockMeta> = {
   },
 };
 
-export function stockMeta(mint: string): StockMeta {
+export function stockMeta(mint: string, otcMint?: string): StockMeta {
+  if (otcMint && mint === otcMint) {
+    return {
+      mint,
+      symbol: "$OTC",
+      company: "OTC",
+      decimals: OTC_DECIMALS,
+    };
+  }
   return (
     STOCKS[mint] ?? {
       mint,

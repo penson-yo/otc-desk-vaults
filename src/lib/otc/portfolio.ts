@@ -14,18 +14,28 @@ import {
   MPL_CORE_PROGRAM_ID,
   VAULT_DISCRIMINATOR,
   WSOL_MINT,
+  TICKER_COUNT,
   stockMeta,
 } from "./constants";
 import {
   allTickersOpen,
   decodeConfig,
+  decodeConfigExt,
   decodeCoreAssetName,
   decodeVault,
+  decodeVaultExt,
   isDefaultMint,
   tickerOpen,
 } from "./decode";
 import { uiAmount } from "./format";
-import { configPda, solPotPda, vaultPda, vaultStockAta } from "./pda";
+import {
+  configExtPda,
+  configPda,
+  solPotPda,
+  vaultExtPda,
+  vaultPda,
+  vaultStockAta,
+} from "./pda";
 import { fetchNftFloor } from "./market";
 import { fetchSpotQuotes } from "./prices";
 import type {
@@ -100,20 +110,40 @@ async function loadPortfolioFrom(
   const warnings: string[] = [];
   const conn = connection(rpc);
   const cfgKey = configPda();
+  const cfgExtKey = configExtPda();
   const potKey = solPotPda();
 
-  const [cfgInfo, potLamports] = await withRetry(() =>
+  const [cfgInfo, cfgExtInfo, potLamports] = await withRetry(() =>
     Promise.all([
       conn.getAccountInfo(cfgKey),
+      conn.getAccountInfo(cfgExtKey),
       conn.getBalance(potKey),
     ]),
   );
 
   if (!cfgInfo) throw new Error("Config account missing from this RPC.");
   const config = decodeConfig(Buffer.from(cfgInfo.data));
+  const configExt = cfgExtInfo
+    ? decodeConfigExt(Buffer.from(cfgExtInfo.data))
+    : null;
   const tokenMint = new PublicKey(config.tokenMint);
   const collection = new PublicKey(config.collection);
-  const activeMints = config.stockMints.filter((m) => !isDefaultMint(m));
+  const legacyActiveCount = config.stockMints.filter(
+    (mint) => !isDefaultMint(mint),
+  ).length;
+  const tickers = [
+    ...config.stockMints.map((mint, index) => ({
+      index,
+      mint,
+      counter: config.counter[index]!,
+    })),
+    ...(configExt?.stockMints.map((mint, extIndex) => ({
+      index: TICKER_COUNT + extIndex,
+      mint,
+      counter: configExt.counter[extIndex]!,
+    })) ?? []),
+  ].filter((ticker) => !isDefaultMint(ticker.mint));
+  const activeMints = tickers.map((ticker) => ticker.mint);
 
   const uniqueWallets = dedupeWallets(wallets);
   const [otcBalances, deskMap, firstMintAt, quotes, nftFloor] =
@@ -140,7 +170,11 @@ async function loadPortfolioFrom(
 
   const allDesks = uniqueWallets.flatMap((w) => deskMap.get(w.address) ?? []);
   const vaultKeys = allDesks.map((d) => vaultPda(new PublicKey(d.asset)));
-  const vaultInfos = await getMultiple(conn, vaultKeys);
+  const vaultExtKeys = vaultKeys.map((vault) => vaultExtPda(vault));
+  const [vaultInfos, vaultExtInfos] = await Promise.all([
+    getMultiple(conn, vaultKeys),
+    getMultiple(conn, vaultExtKeys),
+  ]);
 
   const stockAtas: PublicKey[] = [];
   for (const vault of vaultKeys) {
@@ -169,19 +203,34 @@ async function loadPortfolioFrom(
       return;
     }
     const vaultKey = vaultKeys[i]!;
+    let vaultExt = null;
+    const vaultExtInfo = vaultExtInfos[i];
+    if (vaultExtInfo) {
+      try {
+        vaultExt = decodeVaultExt(Buffer.from(vaultExtInfo.data));
+      } catch (err) {
+        warnings.push(
+          `Could not decode extended vault for ${meta.name}: ${String(err)}`,
+        );
+      }
+    }
     const slots: SlotHolding[] = [];
     let heldUsd = 0;
     let owedUsd = 0;
-    activeMints.forEach((mint) => {
-      const index = config.stockMints.indexOf(mint);
-      const meta = stockMeta(mint);
+    tickers.forEach(({ mint, index, counter }) => {
+      const extIndex = index - TICKER_COUNT;
+      const stamp =
+        extIndex >= 0 ? (vaultExt?.stamp[extIndex] ?? 0n) : vault.stamp[index]!;
+      const open =
+        extIndex >= 0
+          ? tickerOpen(vaultExt?.openAtas ?? 0, extIndex)
+          : tickerOpen(vault.openAtas, index);
+      const meta = stockMeta(mint, config.tokenMint);
       const ata = vaultStockAta(vaultKey, new PublicKey(mint));
       const heldRaw = ataAmounts.get(ata.toBase58()) ?? 0n;
       const held = uiAmount(heldRaw, meta.decimals);
       const owedRaw =
-        config.counter[index]! > vault.stamp[index]!
-          ? (config.counter[index]! - vault.stamp[index]!) / PRECISION
-          : 0n;
+        counter > stamp ? (counter - stamp) / PRECISION : 0n;
       const owed = uiAmount(owedRaw, meta.decimals);
       const price = prices[mint] ?? null;
       const usd = price != null ? (held + owed) * price : 0;
@@ -198,7 +247,7 @@ async function loadPortfolioFrom(
         held,
         owed,
         usd,
-        open: tickerOpen(vault.openAtas, index),
+        open,
         priceUsd: price,
       });
     });
@@ -209,7 +258,7 @@ async function loadPortfolioFrom(
       serial: Number(vault.serial),
       name: meta.name || `OTC Desk #${vault.serial}`,
       owner: meta.owner,
-      activated: allTickersOpen(vault.openAtas, activeMints.length),
+      activated: allTickersOpen(vault.openAtas, legacyActiveCount),
       openMask: vault.openAtas,
       mintedAt: Number(vault.mintedAt),
       depositOtc: uiAmount(vault.deposit, OTC_DECIMALS),
@@ -240,6 +289,7 @@ async function loadPortfolioFrom(
   const now = Math.floor(Date.now() / 1000);
   const yld = estimateYield({
     config,
+    configExt,
     prices,
     firstMintAt,
     now,
@@ -255,10 +305,12 @@ async function loadPortfolioFrom(
       ? liveDesks * apr * mintCostUsd
       : null;
 
-  const nextMint = config.stockMints[config.roundIndex];
+  const nextMint = tickers.find(
+    (ticker) => ticker.index === config.roundIndex,
+  )?.mint;
   const nextTicker =
     nextMint && !isDefaultMint(nextMint)
-      ? stockMeta(nextMint).symbol
+      ? stockMeta(nextMint, config.tokenMint).symbol
       : "—";
 
   return {
