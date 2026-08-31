@@ -13,6 +13,12 @@ export const WSOL_MINT = new PublicKey(
   "So11111111111111111111111111111111111111112",
 );
 
+/** Paxos Global Dollar on Solana mainnet (Token-2022). */
+export const USDG_MINT = new PublicKey(
+  "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
+);
+export const USDG_DECIMALS = 6;
+
 /** Config PDA seeds: ["config"] */
 export const CONFIG_SEED = Buffer.from("config");
 /** Pot PDA seeds: ["sol_pot"] */

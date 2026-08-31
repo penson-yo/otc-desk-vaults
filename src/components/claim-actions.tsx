@@ -19,12 +19,13 @@ import {
   planClaim,
   type QueueItem,
 } from "@/lib/otc/claim-plan";
+import { USDG_DECIMALS, USDG_MINT } from "@/lib/otc/constants";
 import { fmtNum } from "@/lib/otc/format";
 import {
   buildSwapTransaction,
   previewSwaps,
   SLIPPAGE_BPS,
-  sumOtcOut,
+  sumSwapOut,
   type SwapPreview,
 } from "@/lib/otc/jupiter";
 import { userStockAta } from "@/lib/otc/pda";
@@ -45,7 +46,7 @@ type ClaimContextValue = {
   note: string | null;
   disabledReason: string | null;
   claimAll: () => void;
-  claimToOtc: () => void;
+  claimToUsdg: () => void;
 };
 
 const ClaimContext = createContext<ClaimContextValue | null>(null);
@@ -105,7 +106,7 @@ export function ClaimProvider({
               : null;
 
   const run = useCallback(
-    async (toOtc: boolean) => {
+    async (toUsdg: boolean) => {
       if (!publicKey || !data) return;
       const ownerKey = publicKey.toBase58();
       let groups = planClaim(data.desks, ownerKey);
@@ -133,18 +134,18 @@ export function ClaimProvider({
         }
 
         const slip = (SLIPPAGE_BPS / 100).toFixed(1);
-        if (toOtc) {
+        if (toUsdg) {
           const totals = mintTotals(groups);
           const estQuotes = await previewSwaps({
             totals,
-            otcMint: data.protocol.tokenMint,
+            outputMint: USDG_MINT.toBase58(),
             slippageBps: SLIPPAGE_BPS,
           });
           setPreview(estQuotes);
-          const est = sumOtcOut(estQuotes);
+          const est = sumSwapOut(estQuotes, USDG_DECIMALS);
           setNote(
             est > 0
-              ? `Est. ${fmtNum(est, { max: 2 })} OTC · ${slip}% slip. Wallet will ask you to sign.`
+              ? `Est. ${fmtNum(est, { max: 2 })} USDG · ${slip}% slip. Wallet will ask you to sign.`
               : `Quotes failed or dust — claims still run. ${slip}% slip on swaps.`,
           );
         } else {
@@ -170,8 +171,8 @@ export function ClaimProvider({
         const claimFailed = queue.some((it) => it.status === "failed");
         const claimSent = queue.some((it) => it.status === "sent");
 
-        if (toOtc && claimSent) {
-          const otcMint = data.protocol.tokenMint;
+        if (toUsdg && claimSent) {
+          const outputMint = USDG_MINT.toBase58();
           const uniqueMints = [...new Set(groups.map((g) => g.mint))];
           const swapItems: QueueItem[] = [];
           const swapTotals: { mint: string; symbol: string; raw: bigint }[] =
@@ -191,7 +192,7 @@ export function ClaimProvider({
             if (raw <= 0n) {
               swapItems.push({
                 id,
-                label: `${symbol} → $OTC`,
+                label: `${symbol} → USDG`,
                 status: "skipped",
                 error: "No wallet balance after claim",
               });
@@ -200,7 +201,7 @@ export function ClaimProvider({
             swapTotals.push({ mint, symbol, raw });
             swapItems.push({
               id,
-              label: `${symbol} → $OTC`,
+              label: `${symbol} → USDG`,
               status: "pending",
             });
           }
@@ -209,14 +210,14 @@ export function ClaimProvider({
 
           const livePreviews = await previewSwaps({
             totals: swapTotals,
-            otcMint,
+            outputMint,
             slippageBps: SLIPPAGE_BPS,
           });
           setPreview(livePreviews);
-          const est = sumOtcOut(livePreviews);
+          const est = sumSwapOut(livePreviews, USDG_DECIMALS);
           if (est > 0) {
             setNote(
-              `Swapping into ~${fmtNum(est, { max: 2 })} OTC · ${slip}% slip.`,
+              `Swapping into ~${fmtNum(est, { max: 2 })} USDG · ${slip}% slip.`,
             );
           }
 
@@ -293,7 +294,7 @@ export function ClaimProvider({
     note,
     disabledReason,
     claimAll: () => void run(false),
-    claimToOtc: () => void run(true),
+    claimToUsdg: () => void run(true),
   };
 
   return <ClaimContext.Provider value={value}>{children}</ClaimContext.Provider>;
@@ -337,12 +338,12 @@ export function ClaimButtons({
         disabled={!ctx.enabled}
         title={
           ctx.disabledReason ??
-          `Claim, then swap tickers into $OTC via Jupiter · ${(SLIPPAGE_BPS / 100).toFixed(1)}% slip.`
+          `Claim, then swap tickers into USDG via Jupiter · ${(SLIPPAGE_BPS / 100).toFixed(1)}% slip.`
         }
-        onClick={ctx.claimToOtc}
+        onClick={ctx.claimToUsdg}
       >
         {busy ? <Loader2 className="animate-spin" /> : <ArrowRightLeft />}
-        Claim → OTC
+        Claim → USDG
       </Button>
     </div>
   );
@@ -351,7 +352,9 @@ export function ClaimButtons({
 export function ClaimProgress() {
   const ctx = useClaim();
   if (ctx.items.length === 0 && !ctx.note) return null;
-  const est = ctx.preview ? sumOtcOut(ctx.preview) : 0;
+  const est = ctx.preview
+    ? sumSwapOut(ctx.preview, USDG_DECIMALS)
+    : 0;
   return (
     <div className="mt-3 rounded-lg border border-line bg-well/40 px-3 py-2.5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -360,7 +363,7 @@ export function ClaimProgress() {
         </p>
         {est > 0 ? (
           <p className="tnum text-[11px] text-muted-foreground">
-            Est. {fmtNum(est, { max: 2 })} OTC ·{" "}
+            Est. {fmtNum(est, { max: 2 })} USDG ·{" "}
             {(SLIPPAGE_BPS / 100).toFixed(1)}% slip
           </p>
         ) : null}

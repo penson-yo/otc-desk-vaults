@@ -1,5 +1,4 @@
 import { VersionedTransaction } from "@solana/web3.js";
-import { OTC_DECIMALS } from "./constants";
 import { uiAmount } from "./format";
 
 export const JUPITER_QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote";
@@ -78,12 +77,12 @@ export async function buildSwapTransaction(args: {
 
 export async function previewSwaps(args: {
   totals: { mint: string; symbol: string; raw: bigint }[];
-  otcMint: string;
+  outputMint: string;
   slippageBps?: number;
 }): Promise<SwapPreview[]> {
   const out: SwapPreview[] = [];
   for (const t of args.totals) {
-    if (t.mint === args.otcMint || t.raw <= 0n) {
+    if (t.mint === args.outputMint || t.raw <= 0n) {
       out.push({
         mint: t.mint,
         symbol: t.symbol,
@@ -98,7 +97,7 @@ export async function previewSwaps(args: {
     try {
       const quote = await quoteSwap({
         inputMint: t.mint,
-        outputMint: args.otcMint,
+        outputMint: args.outputMint,
         amount: t.raw,
         slippageBps: args.slippageBps ?? SLIPPAGE_BPS,
       });
@@ -137,12 +136,15 @@ export async function previewSwaps(args: {
   return out;
 }
 
-export function sumOtcOut(previews: SwapPreview[]): number {
+export function sumSwapOut(
+  previews: SwapPreview[],
+  outputDecimals: number,
+): number {
   let raw = 0n;
   for (const p of previews) {
     if (p.outAmount != null) raw += p.outAmount;
   }
-  return uiAmount(raw, OTC_DECIMALS);
+  return uiAmount(raw, outputDecimals);
 }
 
 function decodeBase64(b64: string): Uint8Array {
