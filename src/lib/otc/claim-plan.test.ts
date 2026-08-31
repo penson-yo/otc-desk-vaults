@@ -32,6 +32,7 @@ import {
   vaultStockAta,
 } from "./pda";
 import {
+  broadcastAndConfirmRawTransaction,
   hasActiveTransferHook,
   packClaimBatches,
   sendClaimBatches,
@@ -344,7 +345,7 @@ describe("packing", () => {
     assert.ok(items.some((it) => it.label.includes("claim")));
   });
 
-  it("broadcasts every bulk-signed transaction before polling statuses", async () => {
+  it("confirms each signed transaction before requesting the next", async () => {
     const signer = Keypair.generate();
     const events: string[] = [];
     let signatureNumber = 0;
@@ -401,9 +402,51 @@ describe("packing", () => {
 
     assert.deepEqual(events, [
       "broadcast:signature-1",
+      "status:signature-1",
       "broadcast:signature-2",
-      "status:signature-1,signature-2",
+      "status:signature-2",
     ]);
     assert.ok(result.every((item) => item.status === "sent"));
+  });
+
+  it("rebroadcasts signed bytes while a signature is still pending", async () => {
+    let sends = 0;
+    let statusReads = 0;
+    const connection = {
+      sendRawTransaction: async () => {
+        sends += 1;
+        return "pending-signature";
+      },
+      getSignatureStatuses: async () => {
+        statusReads += 1;
+        return {
+          context: { slot: 1 },
+          value: [
+            statusReads >= 5
+              ? {
+                  slot: 1,
+                  confirmations: 1,
+                  err: null,
+                  confirmationStatus: "confirmed" as const,
+                  status: { Ok: null },
+                }
+              : null,
+          ],
+        };
+      },
+      getBlockHeight: async () => 1,
+    } as unknown as import("@solana/web3.js").Connection;
+
+    const signature = await broadcastAndConfirmRawTransaction({
+      connection,
+      rawTransaction: Uint8Array.from([1, 2, 3]),
+      blockhash: BLOCKHASH,
+      lastValidBlockHeight: 999,
+      pollIntervalMs: 1,
+    });
+
+    assert.equal(signature, "pending-signature");
+    assert.equal(statusReads, 5);
+    assert.ok(sends >= 2);
   });
 });

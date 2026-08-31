@@ -31,6 +31,7 @@ import {
 import { userStockAta } from "@/lib/otc/pda";
 import {
   applyHookSkips,
+  broadcastAndConfirmRawTransaction,
   mintsWithTransferHook,
   packClaimBatches,
   sendClaimBatches,
@@ -65,8 +66,13 @@ export function ClaimProvider({
   children: React.ReactNode;
 }) {
   const { connection } = useConnection();
-  const { publicKey, connected, sendTransaction, signAllTransactions } =
-    useWallet();
+  const {
+    publicKey,
+    connected,
+    sendTransaction,
+    signTransaction,
+    signAllTransactions,
+  } = useWallet();
   const [running, setRunning] = useState(false);
   const [items, setItems] = useState<QueueItem[]>([]);
   const [preview, setPreview] = useState<SwapPreview[] | null>(null);
@@ -145,11 +151,11 @@ export function ClaimProvider({
           const est = sumSwapOut(estQuotes, USDG_DECIMALS);
           setNote(
             est > 0
-              ? `Est. ${fmtNum(est, { max: 2 })} USDG · ${slip}% slip. Wallet will ask you to sign.`
+              ? `Est. ${fmtNum(est, { max: 2 })} USDG · ${slip}% slip. Claims and swaps run one transaction at a time.`
               : `Quotes failed or dust — claims still run. ${slip}% slip on swaps.`,
           );
         } else {
-          setNote("Wallet will ask you to sign. Several approvals are OK.");
+          setNote("Wallet will ask you to sign one transaction at a time.");
         }
 
         const { blockhash } = await connection.getLatestBlockhash("confirmed");
@@ -161,6 +167,9 @@ export function ClaimProvider({
           items: queue,
           send: {
             sendTransaction: (tx, conn) => sendTransaction(tx, conn),
+            signTransaction: signTransaction
+              ? (tx) => signTransaction(tx)
+              : undefined,
             signAllTransactions: signAllTransactions
               ? (txs) => signAllTransactions(txs)
               : undefined,
@@ -242,16 +251,21 @@ export function ClaimProvider({
                 userPublicKey: publicKey.toBase58(),
               });
               patchSwap("signed");
-              const sig = await sendTransaction(vtx, connection);
-              const latest = await connection.getLatestBlockhash("confirmed");
-              await connection.confirmTransaction(
-                {
-                  signature: sig,
-                  blockhash: latest.blockhash,
-                  lastValidBlockHeight: latest.lastValidBlockHeight,
-                },
-                "confirmed",
-              );
+              let sig: string;
+              if (signTransaction) {
+                const signed = await signTransaction(vtx);
+                sig = await broadcastAndConfirmRawTransaction({
+                  connection,
+                  rawTransaction: signed.serialize(),
+                  blockhash: signed.message.recentBlockhash,
+                });
+              } else {
+                // Older adapters may only expose sendTransaction. The
+                // signature-only overload avoids pairing the signature with
+                // an unrelated, newly fetched blockhash.
+                sig = await sendTransaction(vtx, connection);
+                await connection.confirmTransaction(sig, "confirmed");
+              }
               patchSwap("sent", { signature: sig });
             } catch (err) {
               patchSwap("failed", { error: explainTxError(err) });
@@ -281,6 +295,7 @@ export function ClaimProvider({
       mine.length,
       connection,
       sendTransaction,
+      signTransaction,
       signAllTransactions,
       onRefresh,
     ],

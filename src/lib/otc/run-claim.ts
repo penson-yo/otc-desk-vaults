@@ -26,19 +26,21 @@ export type SendFns = {
     tx: Transaction,
     connection: Connection,
   ) => Promise<string>;
+  signTransaction?: (tx: Transaction) => Promise<Transaction>;
   signAllTransactions?: (txs: Transaction[]) => Promise<Transaction[]>;
 };
 
 type SubmittedTransaction = {
   signature: string;
   itemIds: string[];
+  rawTransaction?: Uint8Array;
 };
 
 const CU_PER_IX = 250_000;
 const MAX_CU = 1_400_000;
 const CU_PRICE = 10_000;
-const SIGN_ALL_CHUNK = 5;
 const CONFIRM_POLL_MS = 750;
+const REBROADCAST_EVERY_POLLS = 4;
 
 export function hasActiveTransferHook(
   hook: ReturnType<typeof getTransferHook>,
@@ -129,52 +131,91 @@ export function withComputeBudget(
 async function confirmSubmittedTransactions(args: {
   connection: Connection;
   submitted: SubmittedTransaction[];
-  lastValidBlockHeight: number;
+  blockhash: string;
+  lastValidBlockHeight?: number;
   onConfirmed: (tx: SubmittedTransaction) => void;
   onFailed: (tx: SubmittedTransaction, error: unknown) => void;
   pollIntervalMs?: number;
 }): Promise<void> {
   let pending = [...args.submitted];
   const pollIntervalMs = args.pollIntervalMs ?? CONFIRM_POLL_MS;
+  let polls = 0;
+
+  const checkStatuses = async () => {
+    const statuses = await args.connection.getSignatureStatuses(
+      pending.map((tx) => tx.signature),
+      { searchTransactionHistory: true },
+    );
+    const next: SubmittedTransaction[] = [];
+    statuses.value.forEach((status, index) => {
+      const tx = pending[index]!;
+      if (status?.err) {
+        args.onFailed(
+          tx,
+          new Error(`Transaction failed: ${JSON.stringify(status.err)}`),
+        );
+      } else if (
+        status?.confirmationStatus === "confirmed" ||
+        status?.confirmationStatus === "finalized"
+      ) {
+        args.onConfirmed(tx);
+      } else {
+        next.push(tx);
+      }
+    });
+    pending = next;
+  };
 
   while (pending.length > 0) {
     try {
-      const statuses = await args.connection.getSignatureStatuses(
-        pending.map((tx) => tx.signature),
-        { searchTransactionHistory: true },
-      );
-      const next: SubmittedTransaction[] = [];
-      statuses.value.forEach((status, index) => {
-        const tx = pending[index]!;
-        if (status?.err) {
-          args.onFailed(
-            tx,
-            new Error(`Transaction failed: ${JSON.stringify(status.err)}`),
-          );
-        } else if (
-          status?.confirmationStatus === "confirmed" ||
-          status?.confirmationStatus === "finalized"
-        ) {
-          args.onConfirmed(tx);
-        } else {
-          next.push(tx);
-        }
-      });
-      pending = next;
+      await checkStatuses();
     } catch {
       // A transient status-read failure should not relabel submitted claims.
     }
 
     if (pending.length === 0) return;
 
-    let blockHeight: number;
+    polls += 1;
+    if (polls % REBROADCAST_EVERY_POLLS === 0) {
+      await Promise.allSettled(
+        pending.map((tx) =>
+          tx.rawTransaction
+            ? args.connection.sendRawTransaction(tx.rawTransaction, {
+                skipPreflight: true,
+                maxRetries: 0,
+              })
+            : Promise.resolve(),
+        ),
+      );
+    }
+
+    let expired = false;
     try {
-      blockHeight = await args.connection.getBlockHeight("confirmed");
+      if (args.lastValidBlockHeight != null) {
+        const blockHeight = await args.connection.getBlockHeight("confirmed");
+        expired = blockHeight > args.lastValidBlockHeight;
+      } else {
+        const valid = await args.connection.isBlockhashValid(args.blockhash, {
+          commitment: "confirmed",
+        });
+        expired = !valid.value;
+      }
     } catch (err) {
       pending.forEach((tx) => args.onFailed(tx, err));
       return;
     }
-    if (blockHeight > args.lastValidBlockHeight) {
+
+    if (expired) {
+      // Public RPCs can briefly disagree. Give landed signatures a final
+      // history-backed read before displaying an expiry failure.
+      for (let attempt = 0; attempt < 4 && pending.length > 0; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        try {
+          await checkStatuses();
+        } catch {
+          // Try the next grace read.
+        }
+      }
       pending.forEach((tx) =>
         args.onFailed(
           tx,
@@ -188,6 +229,47 @@ async function confirmSubmittedTransactions(args: {
 
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
+}
+
+export async function broadcastAndConfirmRawTransaction(args: {
+  connection: Connection;
+  rawTransaction: Uint8Array;
+  blockhash: string;
+  lastValidBlockHeight?: number;
+  pollIntervalMs?: number;
+}): Promise<string> {
+  const signature = await args.connection.sendRawTransaction(
+    args.rawTransaction,
+    {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+      maxRetries: 5,
+    },
+  );
+  let failure: unknown;
+  let confirmed = false;
+  await confirmSubmittedTransactions({
+    connection: args.connection,
+    submitted: [
+      {
+        signature,
+        itemIds: [],
+        rawTransaction: args.rawTransaction,
+      },
+    ],
+    blockhash: args.blockhash,
+    lastValidBlockHeight: args.lastValidBlockHeight,
+    pollIntervalMs: args.pollIntervalMs,
+    onConfirmed: () => {
+      confirmed = true;
+    },
+    onFailed: (_tx, err) => {
+      failure = err;
+    },
+  });
+  if (failure) throw failure;
+  if (!confirmed) throw new Error(`Transaction ${signature} was not confirmed.`);
+  return signature;
 }
 
 export async function sendClaimBatches(args: {
@@ -207,7 +289,9 @@ export async function sendClaimBatches(args: {
     args.onProgress(items.map((it) => ({ ...it })));
   };
 
-  const canSignAll = typeof args.send.signAllTransactions === "function";
+  const canSign =
+    typeof args.send.signTransaction === "function" ||
+    typeof args.send.signAllTransactions === "function";
 
   const buildTx = (ixs: TransactionInstruction[], blockhash: string) => {
     const tx = new Transaction().add(...withComputeBudget(ixs));
@@ -216,48 +300,30 @@ export async function sendClaimBatches(args: {
     return tx;
   };
 
-  if (canSignAll && args.batches.length > 0) {
-    for (let i = 0; i < args.batches.length; i += SIGN_ALL_CHUNK) {
-      const chunk = args.batches.slice(i, i + SIGN_ALL_CHUNK);
-      const idSlice = chunk.flatMap((b) => b.itemIds);
-      let signed: Transaction[];
-      let lastValidBlockHeight: number;
+  if (canSign && args.batches.length > 0) {
+    // Sign, broadcast, and confirm one packed transaction at a time. This
+    // keeps every approval on a fresh blockhash and prevents a long queue of
+    // signed transactions from expiring while earlier ones are pending.
+    for (const batch of args.batches) {
+      const ids = batch.itemIds;
       try {
-        const latest =
-          await args.connection.getLatestBlockhash("confirmed");
-        lastValidBlockHeight = latest.lastValidBlockHeight;
-        const slice = chunk.map((b) => buildTx(b.ixs, latest.blockhash));
-        signed = await args.send.signAllTransactions!(slice);
+        const latest = await args.connection.getLatestBlockhash("confirmed");
+        const tx = buildTx(batch.ixs, latest.blockhash);
+        const signed = args.send.signTransaction
+          ? await args.send.signTransaction(tx)
+          : (await args.send.signAllTransactions!([tx]))[0]!;
+        patch(ids, "signed");
+        const signature = await broadcastAndConfirmRawTransaction({
+          connection: args.connection,
+          rawTransaction: signed.serialize(),
+          blockhash: latest.blockhash,
+          lastValidBlockHeight: latest.lastValidBlockHeight,
+        });
+        patch(ids, "sent", { signature });
       } catch (err) {
-        patch(idSlice, "failed", { error: explainTxError(err) });
+        patch(ids, "failed", { error: explainTxError(err) });
         if (/cancelled/i.test(explainTxError(err))) break;
-        continue;
       }
-
-      patch(idSlice, "signed");
-      const submitted: SubmittedTransaction[] = [];
-      for (let j = 0; j < signed.length; j++) {
-        const ids = chunk[j]!.itemIds;
-        try {
-          const signature = await args.connection.sendRawTransaction(
-            signed[j]!.serialize(),
-            { skipPreflight: false, preflightCommitment: "confirmed" },
-          );
-          submitted.push({ signature, itemIds: ids });
-        } catch (err) {
-          patch(ids, "failed", { error: explainTxError(err) });
-        }
-      }
-
-      await confirmSubmittedTransactions({
-        connection: args.connection,
-        submitted,
-        lastValidBlockHeight,
-        onConfirmed: ({ signature, itemIds }) =>
-          patch(itemIds, "sent", { signature }),
-        onFailed: ({ itemIds }, err) =>
-          patch(itemIds, "failed", { error: explainTxError(err) }),
-      });
     }
     return items;
   }
@@ -272,7 +338,13 @@ export async function sendClaimBatches(args: {
       const signature = await args.send.sendTransaction(tx, args.connection);
       await confirmSubmittedTransactions({
         connection: args.connection,
-        submitted: [{ signature, itemIds: ids }],
+        submitted: [
+          {
+            signature,
+            itemIds: ids,
+          },
+        ],
+        blockhash,
         lastValidBlockHeight,
         onConfirmed: (submitted) =>
           patch(ids, "sent", { signature: submitted.signature }),
