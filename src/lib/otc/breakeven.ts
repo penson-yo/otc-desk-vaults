@@ -9,6 +9,7 @@ import {
   stockMeta,
 } from "./constants";
 import { connection, loadPortfolio } from "./portfolio";
+import { userStockAta } from "./pda";
 import type {
   BreakEvenResponse,
   ClaimedReward,
@@ -445,6 +446,13 @@ export async function loadBreakEven(
           result = await scanClaimedRewards({
             wallet: wallet.address,
             purchases: walletPurchases,
+            rewardMints: [
+              ...new Set(
+                portfolio.desks
+                  .filter((desk) => desk.owner === wallet.address)
+                  .flatMap((desk) => desk.slots.map((slot) => slot.mint)),
+              ),
+            ],
             conn: connection(rpc),
           });
           break;
@@ -507,30 +515,45 @@ async function fetchMagicEdenActivities(
 async function scanClaimedRewards(args: {
   wallet: string;
   purchases: DeskPurchase[];
+  rewardMints: string[];
   conn: ReturnType<typeof connection>;
 }): Promise<{ claimed: ClaimedAmount[]; warnings: string[] }> {
   const warnings: string[] = [];
   const earliest = Math.min(
     ...args.purchases.map((purchase) => purchase.purchasedAt),
   );
-  const signatures = await rpcRetry(() =>
-    args.conn.getSignaturesForAddress(
-      new PublicKey(args.wallet),
-      { limit: MAX_SIGNATURES },
-      "confirmed",
-    ),
-  );
-  const relevant = signatures.filter(
-    (item) => !item.err && (item.blockTime ?? 0) >= earliest,
-  );
-  if (
-    signatures.length === MAX_SIGNATURES &&
-    (signatures.at(-1)?.blockTime ?? 0) >= earliest
-  ) {
-    warnings.push(
-      `Claim history for ${args.wallet.slice(0, 6)}… was truncated at ${MAX_SIGNATURES} transactions.`,
+  const walletKey = new PublicKey(args.wallet);
+  const relevantBySignature = new Map<
+    string,
+    { signature: string; blockTime?: number | null }
+  >();
+  for (const mint of args.rewardMints) {
+    const tokenAccount = userStockAta(walletKey, new PublicKey(mint));
+    const signatures = await rpcRetry(() =>
+      args.conn.getSignaturesForAddress(
+        tokenAccount,
+        { limit: MAX_SIGNATURES },
+        "confirmed",
+      ),
     );
+    for (const item of signatures) {
+      if (!item.err && (item.blockTime ?? 0) >= earliest) {
+        relevantBySignature.set(item.signature, item);
+      }
+    }
+    if (
+      signatures.length === MAX_SIGNATURES &&
+      (signatures.at(-1)?.blockTime ?? 0) >= earliest
+    ) {
+      warnings.push(
+        `Claim history for ${stockMeta(mint).symbol} was truncated at ${MAX_SIGNATURES} transactions.`,
+      );
+    }
+    await sleep(75);
   }
+  const relevant = [...relevantBySignature.values()].sort(
+    (a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0),
+  );
 
   const transactions: (ParsedTransactionWithMeta | null)[] = [];
   const paceMs = args.conn.rpcEndpoint.includes("publicnode.com") ? 200 : 350;
