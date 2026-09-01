@@ -785,12 +785,15 @@ async function acrossConnections<T>(
   fn: (conn: ReturnType<typeof connection>) => Promise<T>,
 ): Promise<T> {
   let last: unknown;
-  for (const conn of connections) {
-    try {
-      return await fn(conn);
-    } catch (err) {
-      last = err;
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    for (const conn of connections) {
+      try {
+        return await fn(conn);
+      } catch (err) {
+        last = err;
+      }
     }
+    if (cycle === 0) await sleep(750);
   }
   throw last;
 }
