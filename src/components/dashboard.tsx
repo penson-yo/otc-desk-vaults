@@ -408,12 +408,9 @@ export function Dashboard({
         {tab === "vaults" ? (
         <Frame title="Wallets" live>
           <p className="mb-3 text-[12px] leading-relaxed text-muted-foreground">
-            {tab === "swap"
-              ? "Bulk swap uses the connected wallet. Watched addresses stay on the Vaults tab."
-              : "Add one wallet at a time. This browser remembers the list for next visit; the URL is shareable."}
+            Add one wallet at a time. This browser remembers the list for next
+            visit; the URL is shareable.
           </p>
-          {tab === "vaults" ? (
-            <>
           <div className="flex flex-wrap gap-1.5">
             {wallets.map((w) => (
               <span
@@ -492,8 +489,6 @@ export function Dashboard({
           {addError ? (
             <p className="mt-1.5 text-[11px] text-alert">{addError}</p>
           ) : null}
-            </>
-          ) : null}
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Button
               type="button"
@@ -503,7 +498,7 @@ export function Dashboard({
               <Wallet />
               {connected ? "Connected" : "Connect"}
             </Button>
-            {tab === "vaults" && connected && publicKey && !connectedInView ? (
+            {connected && publicKey && !connectedInView ? (
               <Button type="button" variant="outline" onClick={addConnected}>
                 Add {shortAddress(publicKey.toBase58())}
               </Button>
@@ -514,14 +509,14 @@ export function Dashboard({
                 Disconnect
               </Button>
             ) : null}
-            {tab === "vaults" ? <ClaimButtons /> : null}
-            {tab === "vaults" && wallets.length > 0 ? (
+            <ClaimButtons />
+            {wallets.length > 0 ? (
               <Button type="button" variant="ghost" onClick={clearWallets}>
                 Clear list
               </Button>
             ) : null}
           </div>
-          {tab === "vaults" ? <ClaimProgress /> : null}
+          <ClaimProgress />
         </Frame>
         ) : null}
 
