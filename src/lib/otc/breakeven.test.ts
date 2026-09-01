@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  BREAK_EVEN_CACHE_CONTROL,
   assignInstantExitBids,
   calculateBreakEven,
   matchCurrentPurchases,
@@ -62,6 +63,12 @@ describe("Magic Eden cost basis", () => {
     assert.equal(purchases.length, 1);
     assert.equal(purchases[0]!.costSol, 1.2);
     assert.equal(purchases[0]!.purchasedAt, 200);
+  });
+});
+
+describe("break-even freshness", () => {
+  it("does not cache claim history responses", () => {
+    assert.equal(BREAK_EVEN_CACHE_CONTROL, "no-store");
   });
 });
 

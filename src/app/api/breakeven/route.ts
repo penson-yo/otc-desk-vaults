@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loadBreakEven } from "@/lib/otc/breakeven";
+import {
+  BREAK_EVEN_CACHE_CONTROL,
+  loadBreakEven,
+} from "@/lib/otc/breakeven";
 import type { WatchWallet } from "@/lib/otc/types";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +34,7 @@ export async function GET(req: NextRequest) {
     const data = await loadBreakEven(wallets);
     return NextResponse.json(data, {
       headers: {
-        "cache-control": "public, s-maxage=60, stale-while-revalidate=300",
+        "cache-control": BREAK_EVEN_CACHE_CONTROL,
       },
     });
   } catch (err) {

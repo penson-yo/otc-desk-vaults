@@ -23,6 +23,9 @@ const MAGIC_EDEN_API = "https://api-mainnet.magiceden.dev/v2";
 const DAY_SECONDS = 86_400;
 const MAX_SIGNATURES = 1_000;
 
+/** Claim history can change immediately after a wallet transaction. */
+export const BREAK_EVEN_CACHE_CONTROL = "no-store";
+
 export type MagicEdenActivity = {
   signature?: string;
   type?: string;

@@ -239,6 +239,7 @@ export function Dashboard({
       try {
         const res = await fetch(`/api/breakeven?${query}`, {
           signal: combined,
+          cache: "no-store",
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
