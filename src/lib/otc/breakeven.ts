@@ -598,27 +598,46 @@ async function scanClaimedRewards(args: {
   >();
   for (const mint of args.rewardMints) {
     const tokenAccount = userStockAta(walletKey, new PublicKey(mint));
-    const signatures = await acrossConnections(args.connections, (conn) =>
-      rpcRetry(() =>
-        conn.getSignaturesForAddress(
-          tokenAccount,
-          { limit: MAX_SIGNATURES },
-          "confirmed",
+    const signatureResults = await Promise.allSettled(
+      args.connections.map((conn) =>
+        rpcRetry(() =>
+          conn.getSignaturesForAddress(
+            tokenAccount,
+            { limit: MAX_SIGNATURES },
+            "confirmed",
+          ),
         ),
       ),
     );
-    for (const item of signatures) {
-      if (!item.err && (item.blockTime ?? 0) >= earliest) {
-        relevantBySignature.set(item.signature, item);
-      }
-    }
-    if (
-      signatures.length === MAX_SIGNATURES &&
-      (signatures.at(-1)?.blockTime ?? 0) >= earliest
-    ) {
-      warnings.push(
-        `Claim history for ${stockMeta(mint).symbol} was truncated at ${MAX_SIGNATURES} transactions.`,
+    const signaturePages = signatureResults.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    if (signaturePages.length === 0) {
+      const failure = signatureResults.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
       );
+      throw failure?.reason ?? new Error("No claim-history RPC available.");
+    }
+    if (signaturePages.length < args.connections.length) {
+      warnings.push(
+        `Claim history for ${stockMeta(mint).symbol} used ${signaturePages.length}/${args.connections.length} RPCs and may be incomplete.`,
+      );
+    }
+    for (const signatures of signaturePages) {
+      for (const item of signatures) {
+        if (!item.err && (item.blockTime ?? 0) >= earliest) {
+          relevantBySignature.set(item.signature, item);
+        }
+      }
+      if (
+        signatures.length === MAX_SIGNATURES &&
+        (signatures.at(-1)?.blockTime ?? 0) >= earliest
+      ) {
+        warnings.push(
+          `Claim history for ${stockMeta(mint).symbol} was truncated at ${MAX_SIGNATURES} transactions.`,
+        );
+      }
     }
     await sleep(75);
   }
