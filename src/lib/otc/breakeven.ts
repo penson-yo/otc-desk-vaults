@@ -639,17 +639,22 @@ async function scanClaimedRewards(args: {
         );
       }
     }
-    await sleep(75);
+    await sleep(200);
   }
   const relevant = [...relevantBySignature.values()].sort(
     (a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0),
   );
 
   const transactions = await mapWithConcurrency(
-    relevant,
+    relevant.map((item, index) => ({ item, index })),
     3,
-    async (item): Promise<ParsedTransactionWithMeta> =>
-      acrossConnections(args.connections, (conn) =>
+    async ({ item, index }): Promise<ParsedTransactionWithMeta> => {
+      const offset = index % args.connections.length;
+      const connections = [
+        ...args.connections.slice(offset),
+        ...args.connections.slice(0, offset),
+      ];
+      return acrossConnections(connections, (conn) =>
         rpcRetry(async () => {
           const transaction = await conn.getParsedTransaction(item.signature, {
             commitment: "confirmed",
@@ -661,8 +666,9 @@ async function scanClaimedRewards(args: {
             );
           }
           return transaction;
-        }, 2),
-      ),
+        }, 1),
+      );
+    },
   );
 
   const byVault = new Map(
