@@ -2,7 +2,7 @@ import { WSOL_MINT } from "./constants";
 
 export type DexPair = {
   chainId?: string;
-  baseToken?: { address?: string; symbol?: string };
+  baseToken?: { address?: string; symbol?: string; name?: string };
   quoteToken?: { address?: string };
   priceUsd?: string;
   liquidity?: { usd?: number };
@@ -15,6 +15,8 @@ const WSOL = WSOL_MINT.toBase58();
 export type SpotQuotes = {
   prices: Record<string, number>;
   marketCaps: Record<string, number>;
+  symbols: Record<string, string>;
+  names: Record<string, string>;
 };
 
 export async function fetchSpotPrices(
@@ -27,21 +29,34 @@ export async function fetchSpotQuotes(mints: string[]): Promise<SpotQuotes> {
   const unique = [...new Set(mints.filter(Boolean))];
   const prices: Record<string, number> = {};
   const marketCaps: Record<string, number> = {};
+  const symbols: Record<string, string> = {};
+  const names: Record<string, string> = {};
 
   await Promise.all([
-    fillDexscreener(unique, prices, marketCaps),
+    fillDexscreener(unique, prices, marketCaps, symbols, names),
     fillCoinGeckoSol(prices),
   ]);
 
-  return { prices, marketCaps };
+  return { prices, marketCaps, symbols, names };
 }
 
 export function pickBestDexQuote(
   mint: string,
   pairs: DexPair[],
-): { price: number; marketCap: number | null; liq: number } | null {
-  let best: { price: number; marketCap: number | null; liq: number } | null =
-    null;
+): {
+  price: number;
+  marketCap: number | null;
+  liq: number;
+  symbol: string | null;
+  name: string | null;
+} | null {
+  let best: {
+    price: number;
+    marketCap: number | null;
+    liq: number;
+    symbol: string | null;
+    name: string | null;
+  } | null = null;
   for (const pair of pairs) {
     if (pair.chainId && pair.chainId !== "solana") continue;
     const price = Number(pair.priceUsd);
@@ -53,7 +68,13 @@ export function pickBestDexQuote(
     if (!isMint && !isWsol) continue;
     const marketCap = capFromPair(pair);
     if (!best || liq >= best.liq) {
-      best = { price, marketCap, liq };
+      best = {
+        price,
+        marketCap,
+        liq,
+        symbol: pair.baseToken?.symbol ?? null,
+        name: pair.baseToken?.name ?? null,
+      };
     }
   }
   return best;
@@ -69,6 +90,8 @@ async function fillDexscreener(
   mints: string[],
   prices: Record<string, number>,
   marketCaps: Record<string, number>,
+  symbols: Record<string, string> = {},
+  names: Record<string, string> = {},
 ) {
   if (mints.length === 0) return;
   // WSOL has so many pairs that batching it with other mints crowds
@@ -97,6 +120,8 @@ async function fillDexscreener(
         if (best.marketCap != null && marketCaps[mint] == null) {
           marketCaps[mint] = best.marketCap;
         }
+        if (best.symbol && symbols[mint] == null) symbols[mint] = best.symbol;
+        if (best.name && names[mint] == null) names[mint] = best.name;
       }
     } catch {
       // Price feed is best-effort; yield layer explains gaps.

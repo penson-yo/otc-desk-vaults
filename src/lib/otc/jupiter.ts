@@ -17,6 +17,7 @@ export type JupiterQuote = {
 };
 
 export type SwapPreview = {
+  id: string;
   mint: string;
   symbol: string;
   inAmount: bigint;
@@ -25,6 +26,9 @@ export type SwapPreview = {
   skipped: boolean;
   reason?: string;
 };
+
+export const JUPITER_TOKEN_SEARCH_URL =
+  "https://lite-api.jup.ag/tokens/v2/search";
 
 export async function quoteSwap(args: {
   inputMint: string;
@@ -76,14 +80,16 @@ export async function buildSwapTransaction(args: {
 }
 
 export async function previewSwaps(args: {
-  totals: { mint: string; symbol: string; raw: bigint }[];
+  totals: { id?: string; mint: string; symbol: string; raw: bigint }[];
   outputMint: string;
   slippageBps?: number;
 }): Promise<SwapPreview[]> {
   const out: SwapPreview[] = [];
   for (const t of args.totals) {
+    const id = t.id ?? t.mint;
     if (t.mint === args.outputMint || t.raw <= 0n) {
       out.push({
+        id,
         mint: t.mint,
         symbol: t.symbol,
         inAmount: t.raw,
@@ -103,6 +109,7 @@ export async function previewSwaps(args: {
       });
       if (!quote || BigInt(quote.outAmount) <= 0n) {
         out.push({
+          id,
           mint: t.mint,
           symbol: t.symbol,
           inAmount: t.raw,
@@ -114,6 +121,7 @@ export async function previewSwaps(args: {
         continue;
       }
       out.push({
+        id,
         mint: t.mint,
         symbol: t.symbol,
         inAmount: t.raw,
@@ -123,6 +131,7 @@ export async function previewSwaps(args: {
       });
     } catch {
       out.push({
+        id,
         mint: t.mint,
         symbol: t.symbol,
         inAmount: t.raw,
@@ -134,6 +143,39 @@ export async function previewSwaps(args: {
     }
   }
   return out;
+}
+
+export async function lookupJupiterToken(mint: string): Promise<{
+  mint: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+} | null> {
+  try {
+    const res = await fetch(
+      `${JUPITER_TOKEN_SEARCH_URL}?query=${encodeURIComponent(mint)}`,
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as Array<{
+      id?: string;
+      symbol?: string;
+      name?: string;
+      decimals?: number;
+    }>;
+    if (!Array.isArray(json)) return null;
+    const hit = json.find((t) => t.id === mint) ?? json[0];
+    if (!hit?.id || hit.decimals == null || !Number.isFinite(hit.decimals)) {
+      return null;
+    }
+    return {
+      mint: hit.id,
+      symbol: hit.symbol || `${hit.id.slice(0, 4)}…`,
+      name: hit.name || hit.symbol || "Token",
+      decimals: hit.decimals,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function sumSwapOut(

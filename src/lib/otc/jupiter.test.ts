@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { USDG_DECIMALS, USDG_MINT } from "./constants";
+import { USDC_MINT, USDG_DECIMALS, USDG_MINT } from "./constants";
 import { sumSwapOut, type SwapPreview } from "./jupiter";
 
 describe("USDG swap output", () => {
@@ -9,7 +9,10 @@ describe("USDG swap output", () => {
       USDG_MINT.toBase58(),
       "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
     );
-    assert.equal(USDG_DECIMALS, 6);
+    assert.equal(
+      USDC_MINT.toBase58(),
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    );
   });
 
   it("formats raw output using the target token decimals", () => {
