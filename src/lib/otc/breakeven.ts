@@ -649,17 +649,20 @@ async function scanClaimedRewards(args: {
     { length: Math.ceil(relevant.length / 20) },
     (_, index) => relevant.slice(index * 20, index * 20 + 20),
   );
+  const batchConnections = args.connections.filter(
+    (conn) => !conn.rpcEndpoint.includes("publicnode.com"),
+  );
   const transactions = (
     await mapWithConcurrency(
       batches.map((items, index) => ({ items, index })),
       2,
       async ({ items, index }): Promise<ParsedTransactionWithMeta[]> => {
-        const offset = index % args.connections.length;
-        const connections = [
-          ...args.connections.slice(offset),
-          ...args.connections.slice(0, offset),
+        const batchOffset = index % batchConnections.length;
+        const batchReaders = [
+          ...batchConnections.slice(batchOffset),
+          ...batchConnections.slice(0, batchOffset),
         ];
-        const parsed = await acrossConnections(connections, (conn) =>
+        const parsed = await acrossConnections(batchReaders, (conn) =>
           conn.getParsedTransactions(
             items.map((item) => item.signature),
             {
@@ -672,7 +675,7 @@ async function scanClaimedRewards(args: {
           parsed.map((transaction, itemIndex) => {
             if (transaction) return transaction;
             const item = items[itemIndex]!;
-            return acrossConnections(connections, async (conn) => {
+            return acrossConnections(args.connections, async (conn) => {
               const retry = await conn.getParsedTransaction(item.signature, {
                 commitment: "confirmed",
                 maxSupportedTransactionVersion: 0,
