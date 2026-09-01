@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Frame } from "@/components/frame";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { BulkSwapPanel } from "@/components/bulk-swap";
 import {
   ClaimButtons,
   ClaimProgress,
@@ -148,6 +149,7 @@ export function Dashboard({
   const [breakEven, setBreakEven] = useState<BreakEvenResponse | null>(null);
   const [breakEvenError, setBreakEvenError] = useState<string | null>(null);
   const [breakEvenLoading, setBreakEvenLoading] = useState(false);
+  const [tab, setTab] = useState<"vaults" | "swap">("vaults");
 
   const paintedKey = useRef(
     initialData ? initialData.wallets.map((w) => w.address).join(",") : null,
@@ -371,7 +373,9 @@ export function Dashboard({
             <span className="cursor-blink inline-block h-[11px] w-[7px] rounded-[1px] bg-brand" />
           </div>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            Desks, vault stock, and yield
+            {tab === "swap"
+              ? "Swap wallet tokens into USDG or any mint"
+              : "Desks, vault stock, and yield"}
           </p>
         </div>
         <nav className="ml-auto flex shrink-0 items-center gap-3">
@@ -399,12 +403,16 @@ export function Dashboard({
       </header>
 
       <div className="mt-4 grid gap-4">
-        <MarketStrip market={market} />
-        <Frame title="Wallets" live>
+        <AppTabs value={tab} onChange={setTab} />
+        {tab === "vaults" ? <MarketStrip market={market} /> : null}
+        <Frame title={tab === "swap" ? "Wallet" : "Wallets"} live>
           <p className="mb-3 text-[12px] leading-relaxed text-muted-foreground">
-            Add one wallet at a time. This browser remembers the list for next
-            visit; the URL is shareable.
+            {tab === "swap"
+              ? "Bulk swap uses the connected wallet. Watched addresses stay on the Vaults tab."
+              : "Add one wallet at a time. This browser remembers the list for next visit; the URL is shareable."}
           </p>
+          {tab === "vaults" ? (
+            <>
           <div className="flex flex-wrap gap-1.5">
             {wallets.map((w) => (
               <span
@@ -483,6 +491,8 @@ export function Dashboard({
           {addError ? (
             <p className="mt-1.5 text-[11px] text-alert">{addError}</p>
           ) : null}
+            </>
+          ) : null}
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Button
               type="button"
@@ -492,7 +502,7 @@ export function Dashboard({
               <Wallet />
               {connected ? "Connected" : "Connect"}
             </Button>
-            {connected && publicKey && !connectedInView ? (
+            {tab === "vaults" && connected && publicKey && !connectedInView ? (
               <Button type="button" variant="outline" onClick={addConnected}>
                 Add {shortAddress(publicKey.toBase58())}
               </Button>
@@ -503,16 +513,22 @@ export function Dashboard({
                 Disconnect
               </Button>
             ) : null}
-            <ClaimButtons />
-            {wallets.length > 0 ? (
+            {tab === "vaults" ? <ClaimButtons /> : null}
+            {tab === "vaults" && wallets.length > 0 ? (
               <Button type="button" variant="ghost" onClick={clearWallets}>
                 Clear list
               </Button>
             ) : null}
           </div>
-          <ClaimProgress />
+          {tab === "vaults" ? <ClaimProgress /> : null}
         </Frame>
 
+        {tab === "swap" ? (
+          <BulkSwapPanel
+            otcMint={data?.protocol.tokenMint ?? market?.otcMint ?? null}
+          />
+        ) : (
+          <>
         {error ? (
           <Alert variant="destructive">
             <AlertTitle>Could not load the chain</AlertTitle>
@@ -571,6 +587,8 @@ export function Dashboard({
             onRefreshBreakEven={() => void loadBreakEven()}
           />
         ) : null}
+          </>
+        )}
       </div>
     </div>
     </ClaimProvider>
@@ -587,6 +605,48 @@ function LoadingState() {
       </div>
       <Skeleton className="h-40 bg-well" />
       <Skeleton className="h-56 bg-well" />
+    </div>
+  );
+}
+
+function AppTabs({
+  value,
+  onChange,
+}: {
+  value: "vaults" | "swap";
+  onChange: (value: "vaults" | "swap") => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Dashboard"
+      className="flex w-fit rounded-lg border border-line bg-well p-0.5"
+    >
+      {(
+        [
+          ["vaults", "Vaults"],
+          ["swap", "Bulk swap"],
+        ] as const
+      ).map(([id, label]) => {
+        const selected = value === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em]",
+              selected
+                ? "bg-paper text-ink"
+                : "text-muted-foreground hover:text-ink",
+            )}
+            onClick={() => onChange(id)}
+          >
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 }

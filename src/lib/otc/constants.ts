@@ -19,6 +19,12 @@ export const USDG_MINT = new PublicKey(
 );
 export const USDG_DECIMALS = 6;
 
+/** Circle USD Coin on Solana mainnet. */
+export const USDC_MINT = new PublicKey(
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+);
+export const USDC_DECIMALS = 6;
+
 /** Config PDA seeds: ["config"] */
 export const CONFIG_SEED = Buffer.from("config");
 /** Extended ticker registry PDA seeds: ["config_ext"] */
