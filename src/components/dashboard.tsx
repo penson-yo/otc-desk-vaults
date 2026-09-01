@@ -405,7 +405,8 @@ export function Dashboard({
       <div className="mt-4 grid gap-4">
         <AppTabs value={tab} onChange={setTab} />
         {tab === "vaults" ? <MarketStrip market={market} /> : null}
-        <Frame title={tab === "swap" ? "Wallet" : "Wallets"} live>
+        {tab === "vaults" ? (
+        <Frame title="Wallets" live>
           <p className="mb-3 text-[12px] leading-relaxed text-muted-foreground">
             {tab === "swap"
               ? "Bulk swap uses the connected wallet. Watched addresses stay on the Vaults tab."
@@ -522,6 +523,7 @@ export function Dashboard({
           </div>
           {tab === "vaults" ? <ClaimProgress /> : null}
         </Frame>
+        ) : null}
 
         {tab === "swap" ? (
           <BulkSwapPanel

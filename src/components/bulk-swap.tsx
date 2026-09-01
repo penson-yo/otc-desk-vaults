@@ -332,26 +332,6 @@ export function BulkSwapPanel({ otcMint }: { otcMint?: string | null }) {
     }
   }
 
-  if (!connected || !publicKey) {
-    return (
-      <Frame title="Bulk swap">
-        <p className="text-[12.5px] leading-relaxed text-muted-foreground">
-          Connect the wallet that holds the tokens. This swaps balances already
-          in the wallet — it does not claim desk vaults. Use Claim → USDG on
-          the Vaults tab for that.
-        </p>
-        <Button
-          type="button"
-          className="mt-3"
-          onClick={() => setVisible(true)}
-        >
-          <Wallet />
-          Connect wallet
-        </Button>
-      </Frame>
-    );
-  }
-
   return (
     <>
       <Frame
@@ -456,8 +436,9 @@ export function BulkSwapPanel({ otcMint }: { otcMint?: string | null }) {
 
       <Frame
         title="Wallet tokens"
-        live
+        live={!!connected}
         action={
+          connected ? (
           <Button
             type="button"
             variant="ghost"
@@ -468,8 +449,27 @@ export function BulkSwapPanel({ otcMint }: { otcMint?: string | null }) {
           >
             {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
           </Button>
+          ) : null
         }
       >
+        {!connected || !publicKey ? (
+          <>
+            <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+              Connect the wallet that holds the tokens. This swaps balances
+              already in the wallet — it does not claim desk vaults. Use Claim
+              → USDG on the Vaults tab for that.
+            </p>
+            <Button
+              type="button"
+              className="mt-3"
+              onClick={() => setVisible(true)}
+            >
+              <Wallet />
+              Connect wallet
+            </Button>
+          </>
+        ) : (
+          <>
         <p className="mb-3 text-[12px] leading-relaxed text-muted-foreground">
           Connected {shortAddress(publicKey.toBase58(), 6)}. Native SOL keeps{" "}
           {fmtNum(SOL_RESERVE, { max: 2 })} SOL for fees if you include it.
@@ -655,6 +655,8 @@ export function BulkSwapPanel({ otcMint }: { otcMint?: string | null }) {
             Swap {quoteCount || selectedTokens.length} → {resolvedDest.symbol}
           </Button>
         </div>
+          </>
+        )}
       </Frame>
 
       {items.length > 0 || note ? (
