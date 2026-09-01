@@ -293,6 +293,7 @@ describe("break-even calculation", () => {
     assert.equal(result.unsoldClaimedRewardsUsd, 10);
     assert.equal(result.claimedRewardsUsd, 130);
     assert.equal(result.totalRewardsUsd, 140);
+    assert.equal(result.rewardsOnlyRemainingUsd, 260);
     assert.equal(result.desks[0]!.claimedRewardsUsd, 65);
     assert.equal(result.desks[1]!.claimedRewardsUsd, 65);
   });

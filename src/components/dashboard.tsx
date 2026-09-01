@@ -949,8 +949,8 @@ function BreakEvenPanel({
   if (!data && loading) {
     return (
       <Frame title="Break-even" action={action}>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, index) => (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, index) => (
             <Skeleton key={index} className="h-[76px] bg-well" />
           ))}
         </div>
@@ -974,10 +974,12 @@ function BreakEvenPanel({
     data.instantExitSol == null
       ? "No executable bids found"
       : `${data.instantExitDesks}/${data.basisDesks} desks have bid depth`;
+  const rewardsRecovery =
+    data.costBasisUsd > 0 ? data.totalRewardsUsd / data.costBasisUsd : null;
 
   return (
     <Frame title="Break-even" action={action}>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
         <MiniStat
           label="Cost basis"
           value={`${fmtNum(data.costBasisSol, { max: 3, min: 2 })} SOL`}
@@ -988,6 +990,16 @@ function BreakEvenPanel({
           value={fmtUsd(data.totalRewardsUsd)}
           hint={`${fmtUsd(data.realizedRewardsUsd)} realized USDG · ${fmtUsd(data.unsoldClaimedRewardsUsd + data.unclaimedRewardsUsd)} unsold/vault`}
           tone="phos"
+        />
+        <MiniStat
+          label="Net cost remaining"
+          value={fmtUsd(data.rewardsOnlyRemainingUsd)}
+          hint={
+            data.rewardsOnlyRemainingUsd === 0
+              ? `${fmtPct(rewardsRecovery)} recovered · rewards break-even reached`
+              : `${fmtPct(rewardsRecovery)} of cost basis recovered`
+          }
+          tone={data.rewardsOnlyRemainingUsd === 0 ? "phos" : "gold"}
         />
         <MiniStat
           label="Floor exit"
