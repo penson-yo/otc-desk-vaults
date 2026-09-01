@@ -650,7 +650,7 @@ async function scanClaimedRewards(args: {
     (_, index) => relevant.slice(index * 20, index * 20 + 20),
   );
   const batchConnections = args.connections.filter(
-    (conn) => !conn.rpcEndpoint.includes("publicnode.com"),
+    (conn) => conn.rpcEndpoint.includes("api.mainnet-beta.solana.com"),
   );
   const transactions = (
     await mapWithConcurrency(
