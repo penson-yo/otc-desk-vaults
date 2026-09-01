@@ -645,31 +645,50 @@ async function scanClaimedRewards(args: {
     (a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0),
   );
 
-  const transactions = await mapWithConcurrency(
-    relevant.map((item, index) => ({ item, index })),
-    3,
-    async ({ item, index }): Promise<ParsedTransactionWithMeta> => {
-      const offset = index % args.connections.length;
-      const connections = [
-        ...args.connections.slice(offset),
-        ...args.connections.slice(0, offset),
-      ];
-      return acrossConnections(connections, (conn) =>
-        rpcRetry(async () => {
-          const transaction = await conn.getParsedTransaction(item.signature, {
-            commitment: "confirmed",
-            maxSupportedTransactionVersion: 0,
-          });
-          if (!transaction) {
-            throw new Error(
-              `Transaction temporarily unavailable: ${item.signature}`,
-            );
-          }
-          return transaction;
-        }, 1),
-      );
-    },
+  const batches = Array.from(
+    { length: Math.ceil(relevant.length / 20) },
+    (_, index) => relevant.slice(index * 20, index * 20 + 20),
   );
+  const transactions = (
+    await mapWithConcurrency(
+      batches.map((items, index) => ({ items, index })),
+      2,
+      async ({ items, index }): Promise<ParsedTransactionWithMeta[]> => {
+        const offset = index % args.connections.length;
+        const connections = [
+          ...args.connections.slice(offset),
+          ...args.connections.slice(0, offset),
+        ];
+        const parsed = await acrossConnections(connections, (conn) =>
+          conn.getParsedTransactions(
+            items.map((item) => item.signature),
+            {
+              commitment: "confirmed",
+              maxSupportedTransactionVersion: 0,
+            },
+          ),
+        );
+        return Promise.all(
+          parsed.map((transaction, itemIndex) => {
+            if (transaction) return transaction;
+            const item = items[itemIndex]!;
+            return acrossConnections(connections, async (conn) => {
+              const retry = await conn.getParsedTransaction(item.signature, {
+                commitment: "confirmed",
+                maxSupportedTransactionVersion: 0,
+              });
+              if (!retry) {
+                throw new Error(
+                  `Transaction temporarily unavailable: ${item.signature}`,
+                );
+              }
+              return retry;
+            });
+          }),
+        );
+      },
+    )
+  ).flat();
 
   const byVault = new Map(
     args.purchases.map((purchase) => [purchase.vault, purchase]),
