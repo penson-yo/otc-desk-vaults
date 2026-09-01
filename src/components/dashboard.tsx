@@ -243,7 +243,17 @@ export function Dashboard({
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-        setBreakEven(json as BreakEvenResponse);
+        const next = json as BreakEvenResponse;
+        const missingClaimHistory = next.warnings.some((warning) =>
+          warning.startsWith("Claim history failed"),
+        );
+        if (missingClaimHistory) {
+          setBreakEvenError(
+            "Reward history is temporarily unavailable. Keeping the last complete result when available; try refresh in a moment.",
+          );
+          return;
+        }
+        setBreakEven(next);
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") {
           if (!signal?.aborted) {

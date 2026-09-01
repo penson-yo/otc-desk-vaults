@@ -51,13 +51,18 @@ export const TICKER_COUNT = 10;
 export const EXTENDED_TICKER_CAPACITY = 22;
 export const MAX_SUPPLY = 5_000;
 
-/** Tried in order when SOLANA_RPC_URL is unset. Foundation RPC 403s browsers. */
-export const RPC_CANDIDATES = process.env.SOLANA_RPC_URL
-  ? [process.env.SOLANA_RPC_URL]
-  : [
-      "https://solana-rpc.publicnode.com",
-      "https://api.mainnet-beta.solana.com",
-    ];
+/**
+ * Tried in order for server-side reads. A configured provider remains primary,
+ * while public endpoints stay available as fallbacks when it is rate-limited.
+ * Foundation RPC 403s browsers, so clients use the same-origin proxy instead.
+ */
+export const RPC_CANDIDATES = [
+  process.env.SOLANA_RPC_URL,
+  "https://solana-rpc.publicnode.com",
+  "https://api.mainnet-beta.solana.com",
+].filter((rpc, index, candidates): rpc is string =>
+  Boolean(rpc) && candidates.indexOf(rpc) === index,
+);
 
 export const PUBLIC_RPC = RPC_CANDIDATES[0]!;
 
