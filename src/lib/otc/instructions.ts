@@ -193,10 +193,19 @@ export function packTaggedGroups<T>(
     const tx = new Transaction().add(...ixs);
     tx.feePayer = feePayer;
     tx.recentBlockhash = recentBlockhash;
-    return tx.serialize({
-      requireAllSignatures: false,
-      verifySignatures: false,
-    }).length;
+    try {
+      return tx.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false,
+      }).length;
+    } catch (err) {
+      // web3.js enforces the 1,232-byte packet limit while serializing. An
+      // oversized candidate means "start a new batch", not "abort packing".
+      if (/transaction too large/i.test(String(err))) {
+        return Number.POSITIVE_INFINITY;
+      }
+      throw err;
+    }
   };
 
   const txs: { ixs: TransactionInstruction[]; extras: T[] }[] = [];
@@ -204,6 +213,12 @@ export function packTaggedGroups<T>(
   let currentExtras: T[] = [];
   for (const group of groups) {
     if (group.ixs.length === 0) continue;
+    const groupSize = sizeOf(group.ixs);
+    if (group.ixs.length > maxIxs || groupSize > limit) {
+      throw new Error(
+        "One atomic claim group is too large for a Solana transaction.",
+      );
+    }
     if (currentIxs.length === 0) {
       currentIxs = [...group.ixs];
       currentExtras = [group.extra];

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
+import {
+  Keypair,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+} from "@solana/web3.js";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
@@ -274,6 +279,35 @@ describe("transfer hook detection", () => {
 });
 
 describe("packing", () => {
+  it("splits when sizing a candidate itself crosses the packet limit", () => {
+    const largeInstruction = (seed: number) =>
+      new TransactionInstruction({
+        programId: PROGRAM_ID,
+        data: Buffer.from([seed]),
+        keys: Array.from({ length: 18 }, (_, index) => ({
+          pubkey: new PublicKey(
+            Uint8Array.from({ length: 32 }, (_value, byte) =>
+              byte === 0 ? seed + index + 1 : byte === 31 ? index + 1 : seed,
+            ),
+          ),
+          isSigner: false,
+          isWritable: true,
+        })),
+      });
+
+    // Each group is valid alone, but serializing both together throws
+    // "Transaction too large" before a length can be returned.
+    const batches = packInstructionGroups(
+      [[largeInstruction(1)], [largeInstruction(80)]],
+      USER,
+      BLOCKHASH,
+    );
+
+    assert.equal(batches.length, 2);
+    assert.equal(batches[0]!.length, 1);
+    assert.equal(batches[1]!.length, 1);
+  });
+
   it("packs several claim groups without exceeding legacy size", () => {
     const owner = USER.toBase58();
     const desks: DeskHolding[] = [];
