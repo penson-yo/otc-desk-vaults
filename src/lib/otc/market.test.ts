@@ -49,9 +49,10 @@ describe("pickBestDexQuote", () => {
     assert.equal(best.price, 0.00134);
   });
 
-  it("falls back to fdv when marketCap is missing", () => {
-    assert.equal(capFromPair({ fdv: 500_000 }), 500_000);
-    assert.equal(capFromPair({ marketCap: 0, fdv: 12 }), 12);
+  it("never labels fdv as market cap", () => {
+    assert.equal(capFromPair({ fdv: 500_000 }), null);
+    assert.equal(capFromPair({ marketCap: 0, fdv: 12 }), null);
+    assert.equal(capFromPair({ marketCap: 375_000, fdv: 500_000 }), 375_000);
   });
 
   it("ignores pairs for other mints", () => {

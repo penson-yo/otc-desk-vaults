@@ -118,12 +118,11 @@ async function fillJupiterMcap(
     const json = (await res.json()) as Array<{
       id?: string;
       mcap?: number;
-      fdv?: number;
       usdPrice?: number;
     }>;
     const hit = json.find((row) => row.id === mint) ?? json[0];
     if (!hit) return;
-    const cap = Number(hit.mcap ?? hit.fdv);
+    const cap = Number(hit.mcap);
     if (Number.isFinite(cap) && cap > 0 && marketCaps[mint] == null) {
       marketCaps[mint] = cap;
     }

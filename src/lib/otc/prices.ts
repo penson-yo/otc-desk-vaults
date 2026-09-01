@@ -62,8 +62,6 @@ export function pickBestDexQuote(
 export function capFromPair(pair: DexPair): number | null {
   const cap = Number(pair.marketCap);
   if (Number.isFinite(cap) && cap > 0) return cap;
-  const fdv = Number(pair.fdv);
-  if (Number.isFinite(fdv) && fdv > 0) return fdv;
   return null;
 }
 
