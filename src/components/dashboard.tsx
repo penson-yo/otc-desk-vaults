@@ -243,17 +243,7 @@ export function Dashboard({
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-        const next = json as BreakEvenResponse;
-        const missingClaimHistory = next.warnings.some((warning) =>
-          warning.startsWith("Claim history failed"),
-        );
-        if (missingClaimHistory) {
-          setBreakEvenError(
-            "Reward history is temporarily unavailable. Keeping the last complete result when available; try refresh in a moment.",
-          );
-          return;
-        }
-        setBreakEven(next);
+        setBreakEven(json as BreakEvenResponse);
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") {
           if (!signal?.aborted) {
@@ -816,10 +806,18 @@ function Results({
       </Frame>
 
       <BreakEvenPanel
+        key={data.wallets
+          .map((wallet) => wallet.address)
+          .sort()
+          .join(",")}
         data={breakEven}
         error={breakEvenError}
         loading={breakEvenLoading}
         onRefresh={onRefreshBreakEven}
+        walletKey={data.wallets
+          .map((wallet) => wallet.address)
+          .sort()
+          .join(",")}
       />
 
       <Frame title="Combined holdings">
@@ -932,12 +930,33 @@ function BreakEvenPanel({
   error,
   loading,
   onRefresh,
+  walletKey,
 }: {
   data: BreakEvenResponse | null;
   error: string | null;
   loading: boolean;
   onRefresh: () => void;
+  walletKey: string;
 }) {
+  const overrideStorageKey = `otc-desk-vaults:claimed-usdg:${walletKey}`;
+  const [claimedOverride, setClaimedOverride] = useState(() => {
+    try {
+      return localStorage.getItem(overrideStorageKey) ?? "";
+    } catch {
+      return "";
+    }
+  });
+
+  const updateClaimedOverride = (value: string) => {
+    setClaimedOverride(value);
+    try {
+      if (value === "") localStorage.removeItem(overrideStorageKey);
+      else localStorage.setItem(overrideStorageKey, value);
+    } catch {
+      // ignore
+    }
+  };
+
   const action = (
     <div className="flex items-center gap-1.5">
       <Badge variant="outline" className="border-gold/40 text-gold">
@@ -984,8 +1003,46 @@ function BreakEvenPanel({
     data.instantExitSol == null
       ? "No executable bids found"
       : `${data.instantExitDesks}/${data.basisDesks} desks have bid depth`;
+  const parsedOverride = Number(claimedOverride);
+  const overrideUsd =
+    claimedOverride !== "" && Number.isFinite(parsedOverride) && parsedOverride >= 0
+      ? parsedOverride
+      : null;
+  const realizedRewardsUsd = overrideUsd ?? data.realizedRewardsUsd;
+  const totalRewardsUsd =
+    realizedRewardsUsd +
+    data.unsoldClaimedRewardsUsd +
+    data.unclaimedRewardsUsd;
+  const rewardsOnlyRemainingUsd = Math.max(
+    0,
+    data.costBasisUsd - totalRewardsUsd,
+  );
   const rewardsRecovery =
-    data.costBasisUsd > 0 ? data.totalRewardsUsd / data.costBasisUsd : null;
+    data.costBasisUsd > 0 ? totalRewardsUsd / data.costBasisUsd : null;
+  const rewardScale =
+    data.totalRewardsUsd > 0 ? totalRewardsUsd / data.totalRewardsUsd : 1;
+  const dailyRewardsUsd =
+    data.dailyRewardsUsd == null ? null : data.dailyRewardsUsd * rewardScale;
+  const rewardsOnlyEtaDays =
+    rewardsOnlyRemainingUsd === 0
+      ? 0
+      : dailyRewardsUsd != null && dailyRewardsUsd > 0
+        ? rewardsOnlyRemainingUsd / dailyRewardsUsd
+        : null;
+  const rewardAdjustmentUsd = totalRewardsUsd - data.totalRewardsUsd;
+  const economicPnlUsd =
+    data.economicPnlUsd == null
+      ? null
+      : data.economicPnlUsd + rewardAdjustmentUsd;
+  const instantExitEconomicPnlUsd =
+    data.instantExitEconomicPnlUsd == null
+      ? null
+      : data.instantExitEconomicPnlUsd + rewardAdjustmentUsd;
+  const visibleWarnings = data.warnings.map((warning) =>
+    warning.startsWith("Claim history failed")
+      ? "Automatic reward history is temporarily unavailable. Enter claimed USDG above."
+      : warning,
+  );
 
   return (
     <Frame title="Break-even" action={action}>
@@ -997,19 +1054,19 @@ function BreakEvenPanel({
         />
         <MiniStat
           label="Rewards accrued"
-          value={fmtUsd(data.totalRewardsUsd)}
-          hint={`${fmtUsd(data.realizedRewardsUsd)} realized USDG · ${fmtUsd(data.unsoldClaimedRewardsUsd + data.unclaimedRewardsUsd)} unsold/vault`}
+          value={fmtUsd(totalRewardsUsd)}
+          hint={`${fmtUsd(realizedRewardsUsd)} received USDG · ${fmtUsd(data.unsoldClaimedRewardsUsd + data.unclaimedRewardsUsd)} unsold/vault`}
           tone="phos"
         />
         <MiniStat
           label="Net cost remaining"
-          value={fmtUsd(data.rewardsOnlyRemainingUsd)}
+          value={fmtUsd(rewardsOnlyRemainingUsd)}
           hint={
-            data.rewardsOnlyRemainingUsd === 0
+            rewardsOnlyRemainingUsd === 0
               ? `${fmtPct(rewardsRecovery)} recovered · rewards break-even reached`
               : `${fmtPct(rewardsRecovery)} of cost basis recovered`
           }
-          tone={data.rewardsOnlyRemainingUsd === 0 ? "phos" : "gold"}
+          tone={rewardsOnlyRemainingUsd === 0 ? "phos" : "gold"}
         />
         <MiniStat
           label="Floor exit"
@@ -1018,8 +1075,8 @@ function BreakEvenPanel({
               ? "—"
               : `${fmtNum(data.floorValueSol, { max: 3 })} SOL`
           }
-          hint={`With rewards: ${fmtSignedUsd(data.economicPnlUsd)}`}
-          tone={pnlTone(data.economicPnlUsd)}
+          hint={`With rewards: ${fmtSignedUsd(economicPnlUsd)}`}
+          tone={pnlTone(economicPnlUsd)}
         />
         <MiniStat
           label="Exit now"
@@ -1030,21 +1087,41 @@ function BreakEvenPanel({
           }
           hint={
             fullInstantExit
-              ? `With rewards: ${fmtSignedUsd(data.instantExitEconomicPnlUsd)}`
+              ? `With rewards: ${fmtSignedUsd(instantExitEconomicPnlUsd)}`
               : exitHint
           }
-          tone={pnlTone(data.instantExitEconomicPnlUsd)}
+          tone={pnlTone(instantExitEconomicPnlUsd)}
         />
         <MiniStat
           label="Rewards-only ETA"
-          value={fmtEta(data.rewardsOnlyEtaDays)}
+          value={fmtEta(rewardsOnlyEtaDays)}
           hint={
-            data.rewardsOnlyRemainingUsd === 0
+            rewardsOnlyRemainingUsd === 0
               ? "Cost recovered by rewards"
-              : `${fmtUsd(data.rewardsOnlyRemainingUsd)} left at ${fmtUsd(data.dailyRewardsUsd)}/day`
+              : `${fmtUsd(rewardsOnlyRemainingUsd)} left at ${fmtUsd(dailyRewardsUsd)}/day`
           }
           tone="gold"
         />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-well/40 px-3 py-2">
+        <Label htmlFor="claimed-usdg" className="text-[11px] text-muted-foreground">
+          Claimed USDG received
+        </Label>
+        <Input
+          id="claimed-usdg"
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.01"
+          value={claimedOverride}
+          onChange={(event) => updateClaimedOverride(event.target.value)}
+          placeholder={data.realizedRewardsUsd.toFixed(2)}
+          className="h-8 w-32 tnum"
+        />
+        <span className="text-[10px] text-muted-foreground">
+          Optional browser-saved override when RPC history is incomplete.
+        </span>
       </div>
 
       <div className="mt-3 overflow-x-auto rounded-lg border border-line">
@@ -1124,9 +1201,11 @@ function BreakEvenPanel({
         enabled because Magic Eden does not expose a verified public Core NFT
         sell builder for this app; no sale will be signed without your wallet.
       </p>
-      {data.warnings.length > 0 || error ? (
+      {visibleWarnings.length > 0 || error ? (
         <p className="mt-2 text-[11px] leading-relaxed text-gold">
-          {[...data.warnings, ...(error ? [error] : [])].join(" ")}
+          {[...new Set([...visibleWarnings, ...(error ? [error] : [])])].join(
+            " ",
+          )}
         </p>
       ) : null}
     </Frame>
