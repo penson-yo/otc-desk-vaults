@@ -1,10 +1,12 @@
 import {
   PublicKey,
   type ParsedTransactionWithMeta,
+  type TokenBalance,
 } from "@solana/web3.js";
 import {
   MAGIC_EDEN_COLLECTION_SYMBOL,
   RPC_CANDIDATES,
+  USDG_MINT,
   WSOL_MINT,
   stockMeta,
 } from "./constants";
@@ -63,6 +65,13 @@ type ClaimedAmount = {
   amount: number;
 };
 
+export type RealizedAmount = {
+  wallet: string;
+  mint: string;
+  sourceAmount: number;
+  usdgAmount: number;
+};
+
 export type ExitBidAssignment = {
   asset: string;
   poolKey: string;
@@ -115,6 +124,7 @@ export function calculateBreakEven(args: {
   portfolio: PortfolioResponse;
   purchases: DeskPurchase[];
   claimed: ClaimedAmount[];
+  realized?: RealizedAmount[];
   bidsByAsset?: Map<string, MagicEdenPool[]>;
   now: number;
   warnings?: string[];
@@ -126,7 +136,12 @@ export function calculateBreakEven(args: {
   const desksByAsset = new Map(
     args.portfolio.desks.map((desk) => [desk.asset, desk]),
   );
+  const purchaseBySerial = new Map(
+    args.purchases.map((purchase) => [purchase.serial, purchase]),
+  );
   const claimedByDesk = new Map<number, Map<string, number>>();
+  const claimedByWalletMint = new Map<string, number>();
+  const realizedByWalletMint = new Map<string, RealizedAmount>();
   const exitAssignments = assignInstantExitBids({
     assets: args.purchases.map((purchase) => purchase.asset),
     bidsByAsset: args.bidsByAsset ?? new Map(),
@@ -140,6 +155,25 @@ export function calculateBreakEven(args: {
     const byMint = claimedByDesk.get(item.serial) ?? new Map<string, number>();
     byMint.set(item.mint, (byMint.get(item.mint) ?? 0) + item.amount);
     claimedByDesk.set(item.serial, byMint);
+    const purchase = purchaseBySerial.get(item.serial);
+    if (purchase) {
+      const key = walletMintKey(purchase.wallet, item.mint);
+      claimedByWalletMint.set(
+        key,
+        (claimedByWalletMint.get(key) ?? 0) + item.amount,
+      );
+    }
+  }
+
+  for (const item of args.realized ?? []) {
+    const key = walletMintKey(item.wallet, item.mint);
+    const previous = realizedByWalletMint.get(key);
+    realizedByWalletMint.set(key, {
+      wallet: item.wallet,
+      mint: item.mint,
+      sourceAmount: (previous?.sourceAmount ?? 0) + item.sourceAmount,
+      usdgAmount: (previous?.usdgAmount ?? 0) + item.usdgAmount,
+    });
   }
 
   const desks: DeskBreakEven[] = args.purchases
@@ -147,22 +181,41 @@ export function calculateBreakEven(args: {
       const holding = desksByAsset.get(purchase.asset);
       if (!holding) return null;
       const rewards: ClaimedReward[] = [];
+      let realizedRewardsUsd = 0;
+      let unsoldClaimedRewardsUsd = 0;
       for (const [mint, amount] of claimedByDesk.get(purchase.serial) ?? []) {
         const price = args.portfolio.prices[mint];
-        if (price == null) {
+        const key = walletMintKey(purchase.wallet, mint);
+        const totalClaimed = claimedByWalletMint.get(key) ?? amount;
+        const swap = realizedByWalletMint.get(key);
+        const sourceSold = Math.max(0, swap?.sourceAmount ?? 0);
+        const attributableRealizedTotal =
+          swap && sourceSold > 0
+            ? swap.usdgAmount * Math.min(1, totalClaimed / sourceSold)
+            : 0;
+        const unsoldTotal = Math.max(0, totalClaimed - sourceSold);
+        const share = totalClaimed > 0 ? amount / totalClaimed : 0;
+        const realizedUsd = attributableRealizedTotal * share;
+        const unsoldUsd = unsoldTotal * share * (price ?? 0);
+        realizedRewardsUsd += realizedUsd;
+        unsoldClaimedRewardsUsd += unsoldUsd;
+        if (price == null && unsoldTotal > 0) {
           warnings.push(
-            `Missing a current price for ${stockMeta(mint, args.portfolio.protocol.tokenMint).symbol}; claimed value is understated.`,
+            `Missing a current price for ${stockMeta(mint, args.portfolio.protocol.tokenMint).symbol}; unsold claimed value is understated.`,
           );
         }
         rewards.push({
           mint,
           symbol: stockMeta(mint, args.portfolio.protocol.tokenMint).symbol,
           amount,
-          usd: amount * (price ?? 0),
+          usd: realizedUsd + unsoldUsd,
+          realizedUsd,
+          unsoldUsd,
         });
       }
       rewards.sort((a, b) => a.symbol.localeCompare(b.symbol));
-      const claimedRewardsUsd = rewards.reduce((sum, item) => sum + item.usd, 0);
+      const claimedRewardsUsd =
+        realizedRewardsUsd + unsoldClaimedRewardsUsd;
       const unclaimedRewardsUsd = holding.heldUsd + holding.owedUsd;
       const totalRewardsUsd = claimedRewardsUsd + unclaimedRewardsUsd;
       const costUsd = solUsd == null ? 0 : purchase.costSol * solUsd;
@@ -181,6 +234,8 @@ export function calculateBreakEven(args: {
         ...purchase,
         costUsd,
         floorUsd: floorUsdPerDesk,
+        realizedRewardsUsd,
+        unsoldClaimedRewardsUsd,
         claimedRewardsUsd,
         unclaimedRewardsUsd,
         totalRewardsUsd,
@@ -200,6 +255,14 @@ export function calculateBreakEven(args: {
 
   const costBasisSol = desks.reduce((sum, desk) => sum + desk.costSol, 0);
   const costBasisUsd = desks.reduce((sum, desk) => sum + desk.costUsd, 0);
+  const realizedRewardsUsd = desks.reduce(
+    (sum, desk) => sum + desk.realizedRewardsUsd,
+    0,
+  );
+  const unsoldClaimedRewardsUsd = desks.reduce(
+    (sum, desk) => sum + desk.unsoldClaimedRewardsUsd,
+    0,
+  );
   const claimedRewardsUsd = desks.reduce(
     (sum, desk) => sum + desk.claimedRewardsUsd,
     0,
@@ -263,6 +326,8 @@ export function calculateBreakEven(args: {
     instantExitUsd,
     instantExitEconomicPnlUsd,
     instantExitDesks,
+    realizedRewardsUsd,
+    unsoldClaimedRewardsUsd,
     claimedRewardsUsd,
     unclaimedRewardsUsd,
     totalRewardsUsd,
@@ -274,8 +339,12 @@ export function calculateBreakEven(args: {
     desks,
     warnings: [...new Set(warnings)],
     methodology:
-      "Magic Eden buyNow cost basis. Claimed vault transfers and current vault stock are marked at current spot prices. Floor value and the since-purchase reward rate are estimates, not realized profit or a forecast.",
+      "Magic Eden buyNow cost basis. Reward swaps use the net USDG actually received on-chain; claimed tokens not yet swapped and current vault stock are marked at current spot prices. Floor value and the since-purchase reward rate are estimates, not a forecast.",
   };
+}
+
+function walletMintKey(wallet: string, mint: string): string {
+  return `${wallet}:${mint}`;
 }
 
 export function assignInstantExitBids(args: {
@@ -421,6 +490,7 @@ export async function loadBreakEven(
   }
 
   const claimed: ClaimedAmount[] = [];
+  const realized: RealizedAmount[] = [];
   const bidsByAsset = new Map<string, MagicEdenPool[]>();
   for (const purchase of purchases) {
     try {
@@ -442,29 +512,20 @@ export async function loadBreakEven(
     if (walletPurchases.length === 0) continue;
     try {
       const historyRpcs = [...new Set([...RPC_CANDIDATES, portfolio.rpc])];
-      let result: Awaited<ReturnType<typeof scanClaimedRewards>> | null = null;
-      let last: unknown;
-      for (const rpc of historyRpcs) {
-        try {
-          result = await scanClaimedRewards({
-            wallet: wallet.address,
-            purchases: walletPurchases,
-            rewardMints: [
-              ...new Set(
-                portfolio.desks
-                  .filter((desk) => desk.owner === wallet.address)
-                  .flatMap((desk) => desk.slots.map((slot) => slot.mint)),
-              ),
-            ],
-            conn: connection(rpc),
-          });
-          break;
-        } catch (err) {
-          last = err;
-        }
-      }
-      if (!result) throw last;
+      const result = await scanClaimedRewards({
+        wallet: wallet.address,
+        purchases: walletPurchases,
+        rewardMints: [
+          ...new Set(
+            portfolio.desks
+              .filter((desk) => desk.owner === wallet.address)
+              .flatMap((desk) => desk.slots.map((slot) => slot.mint)),
+          ),
+        ],
+        connections: historyRpcs.map((rpc) => connection(rpc)),
+      });
       claimed.push(...result.claimed);
+      realized.push(...result.realized);
       warnings.push(...result.warnings);
     } catch (err) {
       warnings.push(
@@ -477,6 +538,7 @@ export async function loadBreakEven(
     portfolio,
     purchases,
     claimed,
+    realized,
     bidsByAsset,
     now: Math.floor(Date.now() / 1_000),
     warnings,
@@ -519,8 +581,12 @@ async function scanClaimedRewards(args: {
   wallet: string;
   purchases: DeskPurchase[];
   rewardMints: string[];
-  conn: ReturnType<typeof connection>;
-}): Promise<{ claimed: ClaimedAmount[]; warnings: string[] }> {
+  connections: ReturnType<typeof connection>[];
+}): Promise<{
+  claimed: ClaimedAmount[];
+  realized: RealizedAmount[];
+  warnings: string[];
+}> {
   const warnings: string[] = [];
   const earliest = Math.min(
     ...args.purchases.map((purchase) => purchase.purchasedAt),
@@ -532,11 +598,13 @@ async function scanClaimedRewards(args: {
   >();
   for (const mint of args.rewardMints) {
     const tokenAccount = userStockAta(walletKey, new PublicKey(mint));
-    const signatures = await rpcRetry(() =>
-      args.conn.getSignaturesForAddress(
-        tokenAccount,
-        { limit: MAX_SIGNATURES },
-        "confirmed",
+    const signatures = await acrossConnections(args.connections, (conn) =>
+      rpcRetry(() =>
+        conn.getSignaturesForAddress(
+          tokenAccount,
+          { limit: MAX_SIGNATURES },
+          "confirmed",
+        ),
       ),
     );
     for (const item of signatures) {
@@ -558,25 +626,65 @@ async function scanClaimedRewards(args: {
     (a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0),
   );
 
-  const transactions: (ParsedTransactionWithMeta | null)[] = [];
-  const paceMs = args.conn.rpcEndpoint.includes("publicnode.com") ? 200 : 350;
-  for (const item of relevant) {
-    const parsed = await rpcRetry(() =>
-      args.conn.getParsedTransaction(item.signature, {
-        commitment: "confirmed",
-        maxSupportedTransactionVersion: 0,
-      }),
-    );
-    transactions.push(parsed);
-    await sleep(paceMs);
-  }
+  const transactions = await mapWithConcurrency(
+    relevant,
+    3,
+    async (item): Promise<ParsedTransactionWithMeta> =>
+      acrossConnections(args.connections, (conn) =>
+        rpcRetry(async () => {
+          const transaction = await conn.getParsedTransaction(item.signature, {
+            commitment: "confirmed",
+            maxSupportedTransactionVersion: 0,
+          });
+          if (!transaction) {
+            throw new Error(
+              `Transaction temporarily unavailable: ${item.signature}`,
+            );
+          }
+          return transaction;
+        }, 2),
+      ),
+  );
 
   const byVault = new Map(
     args.purchases.map((purchase) => [purchase.vault, purchase]),
   );
   const totals = new Map<string, ClaimedAmount>();
+  const realizedTotals = new Map<string, RealizedAmount>();
+  const rewardMints = new Set(args.rewardMints);
+  const usdgMint = USDG_MINT.toBase58();
   for (const transaction of transactions) {
-    if (!transaction?.meta || transaction.meta.err) continue;
+    if (!transaction.meta || transaction.meta.err) continue;
+    const pre = ownerTokenTotals(
+      transaction.meta.preTokenBalances,
+      args.wallet,
+    );
+    const post = ownerTokenTotals(
+      transaction.meta.postTokenBalances,
+      args.wallet,
+    );
+    const usdgDelta = (post.get(usdgMint) ?? 0) - (pre.get(usdgMint) ?? 0);
+    if (usdgDelta > 0) {
+      const sold = [...rewardMints].flatMap((mint) => {
+        const delta = (post.get(mint) ?? 0) - (pre.get(mint) ?? 0);
+        return delta < 0 ? [{ mint, amount: -delta }] : [];
+      });
+      if (sold.length === 1) {
+        const source = sold[0]!;
+        const key = walletMintKey(args.wallet, source.mint);
+        const previous = realizedTotals.get(key);
+        realizedTotals.set(key, {
+          wallet: args.wallet,
+          mint: source.mint,
+          sourceAmount: (previous?.sourceAmount ?? 0) + source.amount,
+          usdgAmount: (previous?.usdgAmount ?? 0) + usdgDelta,
+        });
+      } else if (sold.length > 1) {
+        warnings.push(
+          `Skipped one ambiguous multi-token USDG conversion at ${transaction.transaction.signatures[0]}.`,
+        );
+      }
+    }
     const accountKeys = transaction.transaction.message.accountKeys.map((key) =>
       key.pubkey.toBase58(),
     );
@@ -622,11 +730,64 @@ async function scanClaimedRewards(args: {
     }
   }
 
-  return { claimed: [...totals.values()], warnings };
+  return {
+    claimed: [...totals.values()],
+    realized: [...realizedTotals.values()],
+    warnings,
+  };
+}
+
+function ownerTokenTotals(
+  balances: TokenBalance[] | null | undefined,
+  owner: string,
+): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const balance of balances ?? []) {
+    if (balance.owner !== owner) continue;
+    const amount = Number(balance.uiTokenAmount.uiAmountString ?? 0);
+    if (!Number.isFinite(amount)) continue;
+    totals.set(balance.mint, (totals.get(balance.mint) ?? 0) + amount);
+  }
+  return totals;
 }
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+async function acrossConnections<T>(
+  connections: ReturnType<typeof connection>[],
+  fn: (conn: ReturnType<typeof connection>) => Promise<T>,
+): Promise<T> {
+  let last: unknown;
+  for (const conn of connections) {
+    try {
+      return await fn(conn);
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw last;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(items[index]!);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+  return results;
 }
 
 async function rpcRetry<T>(fn: () => Promise<T>, tries = 4): Promise<T> {
@@ -642,7 +803,8 @@ async function rpcRetry<T>(fn: () => Promise<T>, tries = 4): Promise<T> {
         message.includes("too many") ||
         message.includes("503") ||
         message.includes("502") ||
-        message.includes("fetch failed");
+        message.includes("fetch failed") ||
+        message.includes("temporarily unavailable");
       if (!retryable || attempt === tries - 1) throw err;
       await sleep(500 * 2 ** attempt);
     }

@@ -203,4 +203,97 @@ describe("break-even calculation", () => {
     assert.equal(result.floorValueUsd, 300);
     assert.equal(result.economicPnlUsd, -50);
   });
+
+  it("uses realized USDG and only reprices the unsold claimed remainder", () => {
+    const desks = [desk("asset-a", "vault-a", 1), desk("asset-b", "vault-b", 2)];
+    const portfolio = {
+      fetchedAt: 0,
+      rpc: "rpc",
+      protocol: {
+        program: "",
+        config: "",
+        pot: "",
+        collection: "",
+        tokenMint: "reward-mint",
+        protocolWallet: "",
+        minted: 2,
+        holders: 2,
+        maxSupply: 2,
+        potSol: 0,
+        roundThresholdSol: 0,
+        nextTicker: "",
+        lastRoundAt: 0,
+        minRoundInterval: 0,
+        depositRequired: 0,
+        surchargeSol: 0,
+        otcBurned: null,
+        paidToHoldersUsd: null,
+        otcPriceUsd: null,
+        otcMarketCapUsd: null,
+        nftFloorSol: 1.5,
+        nftFloorUsd: 150,
+      },
+      prices: {
+        [WSOL_MINT.toBase58()]: 100,
+        "reward-mint": 2,
+      },
+      yield: {
+        status: "unavailable",
+        reason: null,
+        formula: "",
+        paidToHoldersUsd: null,
+        usdPerLiveDesk: null,
+        yearsElapsed: null,
+        firstMintAt: null,
+        mintCostUsd: null,
+        apr: null,
+        apy: null,
+        derived: true,
+      },
+      wallets: [],
+      desks,
+      totals: {
+        otc: 0,
+        otcUsd: 0,
+        desks: 2,
+        liveDesks: 2,
+        vaultUsd: 4,
+        owedUsd: 6,
+        estimatedAnnualUsd: null,
+      },
+      warnings: [],
+    } satisfies PortfolioResponse;
+
+    const result = calculateBreakEven({
+      portfolio,
+      purchases: desks.map((item) => ({
+        wallet: "wallet",
+        asset: item.asset,
+        vault: item.vault,
+        serial: item.serial,
+        purchasedAt: 86_400,
+        costSol: 2,
+      })),
+      claimed: [
+        { serial: 1, mint: "reward-mint", amount: 10 },
+        { serial: 2, mint: "reward-mint", amount: 10 },
+      ],
+      realized: [
+        {
+          wallet: "wallet",
+          mint: "reward-mint",
+          sourceAmount: 15,
+          usdgAmount: 120,
+        },
+      ],
+      now: 172_800,
+    });
+
+    assert.equal(result.realizedRewardsUsd, 120);
+    assert.equal(result.unsoldClaimedRewardsUsd, 10);
+    assert.equal(result.claimedRewardsUsd, 130);
+    assert.equal(result.totalRewardsUsd, 140);
+    assert.equal(result.desks[0]!.claimedRewardsUsd, 65);
+    assert.equal(result.desks[1]!.claimedRewardsUsd, 65);
+  });
 });

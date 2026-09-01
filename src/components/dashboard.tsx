@@ -931,7 +931,7 @@ function BreakEvenPanel({
   const action = (
     <div className="flex items-center gap-1.5">
       <Badge variant="outline" className="border-gold/40 text-gold">
-        Current-price estimate
+        Realized + current
       </Badge>
       <Button
         type="button"
@@ -986,7 +986,7 @@ function BreakEvenPanel({
         <MiniStat
           label="Rewards accrued"
           value={fmtUsd(data.totalRewardsUsd)}
-          hint={`${fmtUsd(data.claimedRewardsUsd)} claimed · ${fmtUsd(data.unclaimedRewardsUsd)} in vaults`}
+          hint={`${fmtUsd(data.realizedRewardsUsd)} realized USDG · ${fmtUsd(data.unsoldClaimedRewardsUsd + data.unclaimedRewardsUsd)} unsold/vault`}
           tone="phos"
         />
         <MiniStat

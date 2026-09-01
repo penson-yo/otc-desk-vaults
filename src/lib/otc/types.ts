@@ -97,6 +97,8 @@ export type ClaimedReward = {
   symbol: string;
   amount: number;
   usd: number;
+  realizedUsd: number;
+  unsoldUsd: number;
 };
 
 export type DeskBreakEven = {
@@ -108,6 +110,8 @@ export type DeskBreakEven = {
   costSol: number;
   costUsd: number;
   floorUsd: number | null;
+  realizedRewardsUsd: number;
+  unsoldClaimedRewardsUsd: number;
   claimedRewardsUsd: number;
   unclaimedRewardsUsd: number;
   totalRewardsUsd: number;
@@ -132,6 +136,8 @@ export type BreakEvenResponse = {
   instantExitUsd: number | null;
   instantExitEconomicPnlUsd: number | null;
   instantExitDesks: number;
+  realizedRewardsUsd: number;
+  unsoldClaimedRewardsUsd: number;
   claimedRewardsUsd: number;
   unclaimedRewardsUsd: number;
   totalRewardsUsd: number;
